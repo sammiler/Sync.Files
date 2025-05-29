@@ -74,15 +74,14 @@
     <Compile Include="ui\ViewModels\ViewModelBase.cs" />
   </ItemGroup>
   <ItemGroup>
-  <VSCTCompile Include=".vsct" />
-  <Content Include="py-script\delete.py" />
+    <VSCTCompile Include=".vsct" />
+    <Content Include="py-script\delete.py" />
   </ItemGroup>
-<ItemGroup>
-  <None Include="Menus.ctmenu" />
-  <None Include="source.extension.vsixmanifest">
-    <SubType>Designer</SubType>
-  </None>
-</ItemGroup>
+  <ItemGroup>
+    <None Include="source.extension.vsixmanifest">
+      <SubType>Designer</SubType>
+    </None>
+  </ItemGroup>
   <ItemGroup>
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />

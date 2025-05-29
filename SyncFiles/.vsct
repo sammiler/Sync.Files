@@ -17,8 +17,9 @@
   <Commands package="guidSyncFilesPackage">
     <Buttons>
       <Button guid="guidSyncFilesCmdSet" id="cmdidShowSyncFilesToolWindow" priority="0x0100" type="Button">
-        <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1"/>
-        <CommandFlag>DynamicVisibility</CommandFlag>
+        <!-- 临时放到“工具”菜单，排查菜单组问题 -->
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS"/>
+        <!-- 先不加 DynamicVisibility，确保按钮能显示 -->
         <Strings>
           <ButtonText>Sync Files Tool Window</ButtonText>
           <ToolTipText>Open the Sync Files tool window.</ToolTipText>
