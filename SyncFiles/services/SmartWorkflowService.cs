@@ -12,7 +12,6 @@ using SyncFiles.Core.Models;
 using SyncFiles.Core.Settings;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
-
 namespace SyncFiles.Core.Services
 {
     public class SmartWorkflowService : IDisposable
@@ -21,14 +20,10 @@ namespace SyncFiles.Core.Services
         private readonly SyncFilesSettingsManager _settingsManager;
         private readonly GitHubSyncService _gitHubSyncService;
         private HttpClient _httpClient;
-
-        // 事件：当由本服务发起的文件下载阶段完成后触发
         public event EventHandler WorkflowDownloadPhaseCompleted;
-
         private SmartPlatformConfig _pendingPlatformConfigFromYaml;
         private bool _isWorkflowSyncInProgress = false; // 标记由本服务发起的同步操作
         private object _lock = new object(); // 用于同步访问 _isWorkflowSyncInProgress 和 _pendingPlatformConfigFromYaml
-
         public SmartWorkflowService(
             string projectBasePath,
             SyncFilesSettingsManager settingsManager,
@@ -37,15 +32,10 @@ namespace SyncFiles.Core.Services
             _projectBasePath = projectBasePath ?? throw new ArgumentNullException(nameof(projectBasePath));
             _settingsManager = settingsManager ?? throw new ArgumentNullException(nameof(settingsManager));
             _gitHubSyncService = gitHubSyncService ?? throw new ArgumentNullException(nameof(gitHubSyncService));
-
             _httpClient = new HttpClient();
             _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("SyncFilesCsharpPlugin-Workflow/1.0");
-
-            // SmartWorkflowService 订阅 GitHubSyncService 的完成事件，
-            // 以便知道何时它触发的同步操作已完成。
             _gitHubSyncService.SynchronizationCompleted += OnGitHubSyncServiceCompleted;
         }
-
         private string ResolveValue(string value)
         {
             if (string.IsNullOrWhiteSpace(value)) return value;
@@ -57,7 +47,6 @@ namespace SyncFiles.Core.Services
             resolved = Environment.ExpandEnvironmentVariables(resolved);
             return resolved;
         }
-
         private string GetPlatformKeyFromYaml(Dictionary<string, SmartPlatformConfig> allPlatformsData)
         {
             const string expectedKey = "SyncFiles";
@@ -73,7 +62,6 @@ namespace SyncFiles.Core.Services
             Console.WriteLine($"[WARN] [WORKFLOW] Expected key '{expectedKey}' not found in YAML, and no clear fallback. Available keys: {(allPlatformsData == null ? "none" : string.Join(", ", allPlatformsData.Keys))}");
             return null;
         }
-
         public async Task PrepareWorkflowFromYamlUrlAsync(string yamlUrl, CancellationToken cancellationToken = default)
         {
             Console.WriteLine($"[INFO] [WORKFLOW] Phase 1: Starting Smart Workflow from URL: {yamlUrl}");
@@ -97,10 +85,8 @@ namespace SyncFiles.Core.Services
                 Console.WriteLine($"[ERROR] [WORKFLOW] Failed to download YAML from '{yamlUrl}': {ex.Message}");
                 throw new InvalidOperationException($"Failed to download YAML: {ex.Message}", ex);
             }
-
             await ProcessYamlContentAsync(yamlContent, cancellationToken);
         }
-
         public async Task ProcessYamlContentAsync(string yamlContent, CancellationToken cancellationToken = default)
         {
             lock (_lock)
@@ -109,12 +95,10 @@ namespace SyncFiles.Core.Services
                 _isWorkflowSyncInProgress = false;
             }
             Console.WriteLine("[INFO] [WORKFLOW] Phase 1: Processing YAML content...");
-
             var deserializer = new DeserializerBuilder()
                 .WithNamingConvention(CamelCaseNamingConvention.Instance)
                 .IgnoreUnmatchedProperties()
                 .Build();
-
             Dictionary<string, SmartPlatformConfig> allPlatformsData;
             try
             {
@@ -125,24 +109,19 @@ namespace SyncFiles.Core.Services
                 Console.WriteLine($"[ERROR] [WORKFLOW] Failed to parse YAML content: {ex.Message}");
                 throw new FormatException($"Invalid YAML content: {ex.Message}", ex);
             }
-
             string platformKey = GetPlatformKeyFromYaml(allPlatformsData);
             if (string.IsNullOrEmpty(platformKey) || !allPlatformsData.TryGetValue(platformKey, out var parsedConfig) || parsedConfig == null)
             {
                 Console.WriteLine($"[ERROR] [WORKFLOW] No suitable configuration found in YAML for keys like '{platformKey}'.");
                 throw new KeyNotFoundException("No suitable configuration found in YAML.");
             }
-
             cancellationToken.ThrowIfCancellationRequested();
-
             lock (_lock)
             {
                 _pendingPlatformConfigFromYaml = parsedConfig; // Store for Phase 2
             }
             Console.WriteLine($"[INFO] [WORKFLOW] Successfully parsed YAML for key '{platformKey}'.");
-
             SyncFilesSettingsState currentSettings = _settingsManager.LoadSettings(_projectBasePath);
-
             bool mappingsUpdated = false;
             if (parsedConfig.Mappings != null && parsedConfig.Mappings.Any())
             {
@@ -174,15 +153,12 @@ namespace SyncFiles.Core.Services
             {
                 Console.WriteLine("[WARN] [WORKFLOW] No explicit 'mappings' list or 'sourceUrl'/'targetDir' found in YAML for mapping updates. Sync will use existing mappings if any.");
             }
-
             if (mappingsUpdated)
             {
                 _settingsManager.SaveSettings(currentSettings, _projectBasePath);
                 Console.WriteLine("[INFO] [WORKFLOW] Settings (with updated mappings for sync) saved.");
             }
-
             cancellationToken.ThrowIfCancellationRequested();
-
             if (currentSettings.Mappings == null || !currentSettings.Mappings.Any())
             {
                 Console.WriteLine("[WARN] [WORKFLOW] No mappings to process for GitHub sync. Skipping download phase.");
@@ -190,7 +166,6 @@ namespace SyncFiles.Core.Services
                 WorkflowDownloadPhaseCompleted?.Invoke(this, EventArgs.Empty); // Signal phase 1 completion (even if no download)
                 return;
             }
-
             Console.WriteLine("[INFO] [WORKFLOW] Triggering GitHub file synchronization as part of workflow...");
             lock (_lock)
             {
@@ -199,7 +174,6 @@ namespace SyncFiles.Core.Services
             try
             {
                 await _gitHubSyncService.SyncAllAsync(currentSettings, cancellationToken);
-                // The actual notification that this specific sync is done will come via OnGitHubSyncServiceCompleted
             }
             catch (OperationCanceledException)
             {
@@ -214,9 +188,6 @@ namespace SyncFiles.Core.Services
                 throw;
             }
         }
-
-        // This method is called when ANY GitHubSyncService.SynchronizationCompleted event fires.
-        // We only care about it if it was a sync triggered by THIS workflow service instance.
         private void OnGitHubSyncServiceCompleted(object sender, EventArgs e)
         {
             bool wasThisWorkflowSync;
@@ -228,21 +199,12 @@ namespace SyncFiles.Core.Services
                     _isWorkflowSyncInProgress = false; // Reset the flag
                 }
             }
-
             if (wasThisWorkflowSync)
             {
                 Console.WriteLine("[INFO] [WORKFLOW] GitHub sync (triggered by workflow) has completed. Raising WorkflowDownloadPhaseCompleted event.");
-                // Raise the event to signal that the download phase of *this* workflow is complete.
                 WorkflowDownloadPhaseCompleted?.Invoke(this, EventArgs.Empty);
             }
-            // If wasThisWorkflowSync is false, it means some other part of the application triggered
-            // GitHubSyncService, and this specific SmartWorkflowService instance doesn't need to react to it.
         }
-
-        /// <summary>
-        /// Phase 2: Applies remaining configurations from the stored YAML data.
-        /// This method SHOULD BE CALLED by the subscriber of WorkflowDownloadPhaseCompleted event.
-        /// </summary>
         public void FinalizeWorkflowConfiguration()
         {
             SmartPlatformConfig yamlConfig;
@@ -257,10 +219,7 @@ namespace SyncFiles.Core.Services
                 _pendingPlatformConfigFromYaml = null; // Consume the pending config
             }
             Console.WriteLine("[INFO] [WORKFLOW] Phase 2: Finalizing configuration using stored YAML data.");
-
             SyncFilesSettingsState currentSettings = _settingsManager.LoadSettings(_projectBasePath);
-
-            // 1. Update Python Executable Path
             if (!string.IsNullOrWhiteSpace(yamlConfig.PythonExecutablePath))
             {
                 string resolvedPyExe = ResolveValue(yamlConfig.PythonExecutablePath);
@@ -274,8 +233,6 @@ namespace SyncFiles.Core.Services
                     Console.WriteLine($"[WARN] [WORKFLOW] Python executable from YAML ('{resolvedPyExe}') not found or path is empty. Retaining existing: '{currentSettings.PythonExecutablePath}'.");
                 }
             }
-
-            // 2. Update Python Script Path
             if (!string.IsNullOrWhiteSpace(yamlConfig.PythonScriptPath))
             {
                 string tempPath = ResolveValue(yamlConfig.PythonScriptPath);
@@ -288,7 +245,6 @@ namespace SyncFiles.Core.Services
                 {
                     resolvedPyScriptDir = Path.GetFullPath(Path.Combine(_projectBasePath, tempPath));
                 }
-
                 if (Directory.Exists(resolvedPyScriptDir))
                 {
                     currentSettings.PythonScriptPath = resolvedPyScriptDir;
@@ -299,8 +255,6 @@ namespace SyncFiles.Core.Services
                     Console.WriteLine($"[WARN] [WORKFLOW] Python script directory from YAML ('{resolvedPyScriptDir}') not found. Retaining existing: '{currentSettings.PythonScriptPath}'.");
                 }
             }
-
-            // 3. Update Environment Variables
             if (yamlConfig.EnvVariables != null)
             {
                 currentSettings.EnvVariables.Clear();
@@ -315,8 +269,6 @@ namespace SyncFiles.Core.Services
                 }
                 Console.WriteLine($"[INFO] [WORKFLOW] Environment variables updated from YAML. Count: {currentSettings.EnvVariables.Count}");
             }
-
-            // 4. Update Watch Entries
             if (yamlConfig.WatchEntries != null)
             {
                 currentSettings.WatchEntries.Clear();
@@ -327,7 +279,6 @@ namespace SyncFiles.Core.Services
                         string resolvedWatched = ResolveValue(smartEntry.WatchedPath);
                         string tempScriptPath = ResolveValue(smartEntry.OnEventScript);
                         string resolvedScript;
-
                         if (Path.IsPathRooted(tempScriptPath))
                         {
                             resolvedScript = Path.GetFullPath(tempScriptPath);
@@ -341,9 +292,6 @@ namespace SyncFiles.Core.Services
                             }
                             resolvedScript = Path.GetFullPath(Path.Combine(scriptBase, tempScriptPath));
                         }
-                        // It's good practice to ensure the script file actually exists before adding a watch entry for it.
-                        // However, FileSystemWatcherService will also perform this check.
-                        // For now, we add as resolved by YAML.
                         if (File.Exists(resolvedScript))
                         {
                             currentSettings.WatchEntries.Add(new Models.WatchEntry(resolvedWatched, resolvedScript));
@@ -356,27 +304,21 @@ namespace SyncFiles.Core.Services
                 }
                 Console.WriteLine($"[INFO] [WORKFLOW] Watch entries updated from YAML. Count: {currentSettings.WatchEntries.Count}");
             }
-
             _settingsManager.SaveSettings(currentSettings, _projectBasePath);
             Console.WriteLine("[INFO] [WORKFLOW] Phase 2: All configurations applied and final settings saved.");
         }
-
         public void UnsubscribeGitHubSyncEvents()
         {
-            // Method to be called if SmartWorkflowService instance is being disposed or replaced,
-            // to prevent old instances from reacting to GitHubSyncService events.
             if (_gitHubSyncService != null)
             {
                 _gitHubSyncService.SynchronizationCompleted -= OnGitHubSyncServiceCompleted;
             }
         }
-
         public void Dispose()
         {
             Dispose(true);
             GC.SuppressFinalize(this);
         }
-
         protected virtual void Dispose(bool disposing)
         {
             if (disposing)

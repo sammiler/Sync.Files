@@ -35,6 +35,7 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <UseVSHostingProcess>true</UseVSHostingProcess>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>pdbonly</DebugType>
@@ -97,6 +98,7 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include=".vsct" />
+    <Content Include="py-script\delete.py" />
   </ItemGroup>
   <ItemGroup>
     <Page Include="ui\ToolWindows\SyncFilesToolWindowControl.xaml">

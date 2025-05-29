@@ -1,25 +1,19 @@
 ﻿// File: Settings/SyncFilesSettingsState.cs
-// ... (其他 using 语句)
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Xml.Serialization; // For DefaultValue attribute
-
 namespace SyncFiles.Core.Settings
 {
     [Serializable]
-    // [XmlRoot("component")] // 这个 XmlRoot 属性现在由 ProjectWrapper 的 [XmlElement("component")] 处理
     public class SyncFilesSettingsState
     {
-        // ... (Mappings, EnvironmentVariablesList, EnvVariables, PythonScriptPath, PythonExecutablePath, WatchEntries, ScriptGroups 保持不变) ...
         [XmlArray("mappings")]
         [XmlArrayItem("Mapping")]
         public List<Models.Mapping> Mappings { get; set; }
-
         [XmlArray("envVariablesMap")]
         [XmlArrayItem("entry", typeof(EnvironmentVariableEntry))]
         public List<EnvironmentVariableEntry> EnvironmentVariablesList { get; set; }
-
         [XmlIgnore]
         public Dictionary<string, string> EnvVariables
         {
@@ -44,27 +38,20 @@ namespace SyncFiles.Core.Settings
                 }
             }
         }
-
         [XmlElement("pythonScriptPath")]
         [DefaultValue("")] // Helps XmlSerializer to omit if empty
         public string PythonScriptPath { get; set; }
-
         [XmlElement("pythonExecutablePath")]
         [DefaultValue("")] // Helps XmlSerializer to omit if empty
         public string PythonExecutablePath { get; set; }
-
         [XmlArray("watchEntries")]
         [XmlArrayItem("WatchEntry")]
         public List<Models.WatchEntry> WatchEntries { get; set; }
-
         [XmlArray("scriptGroups")]
         [XmlArrayItem("ScriptGroup")]
         public List<Models.ScriptGroup> ScriptGroups { get; set; }
-
-
         [XmlAttribute("name")] // 这个属性将由 XmlSerializer 用于 <component name="...">
         public string ComponentName { get; set; }
-
         public SyncFilesSettingsState()
         {
             Mappings = new System.Collections.Generic.List<Models.Mapping>();
