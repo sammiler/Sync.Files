@@ -74,7 +74,7 @@
     <Compile Include="ui\ViewModels\ViewModelBase.cs" />
   </ItemGroup>
   <ItemGroup>
-    <VSCTCompile Include=".vsct" />
+    <VSCTCompile Include="SyncFilesCommands.vsct" />
     <Content Include="py-script\delete.py" />
   </ItemGroup>
   <ItemGroup>

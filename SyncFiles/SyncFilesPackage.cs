@@ -15,7 +15,7 @@ namespace SyncFiles // 确保这是你的 VSIX 项目的根命名空间
 {
     [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
     [InstalledProductRegistration("#110", "#112", "1.0", IconResourceID = 400)] // About box info
-    [ProvideMenuResource(".vsct", 1)] // For command registration (VSCT file)
+    [ProvideMenuResource("SyncFilesCommands", 1)] // For command registration (VSCT file)
     [ProvideToolWindow(typeof(SyncFilesToolWindow), Style = VsDockStyle.Tabbed, Window = EnvDTE.Constants.vsWindowKindSolutionExplorer)] // 注册工具窗口
     [Guid(SyncFilesPackage.PackageGuidString)]
     [ProvideAutoLoad(UIContextGuids80.SolutionExists, PackageAutoLoadFlags.BackgroundLoad)] // Fixed CS0117 by using "SolutionExists" instead of "SolutionExists_string"
