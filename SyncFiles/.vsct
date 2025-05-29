@@ -1,35 +1,29 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
-  <!-- ... (可能已存在的 Symbols, KeyBindings, etc.) ... -->
+  <!-- 引入 VS 标准命令和菜单定义 -->
+  <Extern href="vsshlids.h"/>
 
   <Symbols>
-    <!-- Package GUID (与 SyncFilesPackage.cs 中的 PackageGuidString 一致) -->
+    <!-- 包 GUID -->
     <GuidSymbol name="guidSyncFilesPackage" value="{f844e235-75b7-4cf6-8e53-4f5cb0866969}" />
-
-    <!-- CommandSet GUID (与 ShowToolWindowCommand.cs 中的 CommandSet 一致) -->
-    <GuidSymbol name="guidSyncFilesCmdSet" value="{1d2c490a-9d9c-43ce-b45e-9e05a7e80d91}"> <!-- **替换** -->
+    <!-- 命令集 GUID -->
+    <GuidSymbol name="guidSyncFilesCmdSet" value="{1d2c490a-9d9c-43ce-b45e-9e05a7e80d91}">
       <IDSymbol name="cmdidShowSyncFilesToolWindow" value="0x0100" />
     </GuidSymbol>
-    
-    <!-- (可选) Icon GUID and ID if you have custom icons for menu -->
-    <!-- <GuidSymbol name="guidImages" value="{ ... }">
-      <IDSymbol name="bmpPic1" value="1" />
-    </GuidSymbol> -->
+    <!-- VS 内置图标 GUID -->
+    <GuidSymbol name="ImageCatalogGuid" value="{ae27a6b0-e345-4288-96df-5eaf394ee369}" />
   </Symbols>
 
   <Commands package="guidSyncFilesPackage">
     <Buttons>
       <Button guid="guidSyncFilesCmdSet" id="cmdidShowSyncFilesToolWindow" priority="0x0100" type="Button">
-        <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1"/> <!-- "View" -> "Other Windows" group -->
-        <Icon guid="ImageCatalogGuid" id="ToolWindow" /> <!-- 使用 VS 内置图标 -->
-        <!-- <Icon guid="guidImages" id="bmpPic1" /> -->
+        <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1"/>
         <CommandFlag>DynamicVisibility</CommandFlag>
         <Strings>
           <ButtonText>Sync Files Tool Window</ButtonText>
-          <ToolTipText>Opens the Sync Files tool window.</ToolTipText>
+          <ToolTipText>Open the Sync Files tool window.</ToolTipText>
         </Strings>
       </Button>
     </Buttons>
   </Commands>
-  <!-- ... (可能已存在的 Bitmaps, etc.) ... -->
 </CommandTable>
