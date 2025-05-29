@@ -1,0 +1,152 @@
+﻿<UserControl x:Class="SyncFiles.UI.ToolWindows.SyncFilesToolWindowControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:SyncFiles.UI.ToolWindows"
+             xmlns:viewModels="clr-namespace:SyncFiles.UI.ViewModels" 
+             mc:Ignorable="d" 
+             d:DesignHeight="450" d:DesignWidth="300"
+             Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}">
+    <!-- 
+    xmlns:viewModels="clr-namespace:SyncFiles.UI.ViewModels" 
+    假设你的 ViewModel 会放在 SyncFiles.UI.ViewModels 命名空间下。
+    如果你的 VSIX 项目名不同，或者 ViewModel 命名空间不同，请相应调整。
+    例如，如果你的 VSIX 项目根命名空间是 SyncFiles.VSIX，那么可能是：
+    xmlns:viewModels="clr-namespace:SyncFiles.VSIX.UI.ViewModels"
+    你需要先创建 ViewModels 文件夹和至少一个 ViewModel 类（比如 SyncFilesToolWindowViewModel.cs 的空壳）
+    才能让这个 xmlns 引用在设计时不报错。但即使报错，运行时如果 DataContext 正确设置也会工作。
+    -->
+    <UserControl.Resources>
+        <!-- 以后可以在这里添加转换器，例如 BooleanToVisibilityConverter -->
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+    </UserControl.Resources>
+
+    <UserControl.DataContext>
+        <!-- 
+        这里我们直接在 XAML 中实例化 ViewModel。
+        在更复杂的场景中，DataContext 可能会在 code-behind 或通过依赖注入设置。
+        确保 SyncFiles.UI.ViewModels.SyncFilesToolWindowViewModel 类存在（即使是空类）。
+        -->
+        <viewModels:SyncFilesToolWindowViewModel/>
+    </UserControl.DataContext>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <!-- Toolbar -->
+            <RowDefinition Height="*"/>
+            <!-- TreeView -->
+        </Grid.RowDefinitions>
+
+        <!-- 1. Toolbar -->
+        <ToolBar Grid.Row="0" Height="Auto" Padding="2">
+            <!-- 我们将使用 Command 绑定到 ViewModel -->
+            <Button Command="{Binding RefreshScriptsCommand}" ToolTip="Refresh Scripts and Workspace" RenderTransformOrigin="-28.874,19.969">
+                <!-- TODO: 替换为实际的图标。现在用文本占位符 -->
+                <TextBlock Text="♻️"/>
+                <!-- 
+                示例图标（需要将图标添加到项目中并设置为Resource）：
+                <Image Source="/YourAssemblyName;component/Resources/RefreshIcon.png" Width="16" Height="16"/>
+                或者使用 Visual Studio 的标准图像服务 (IVsImageService2)
+                -->
+            </Button>
+            <Button Command="{Binding AddGroupCommand}" ToolTip="Add New Script Group">
+                <TextBlock Text="➕G"/>
+            </Button>
+            <Separator/>
+            <Button Command="{Binding SyncGitHubFilesCommand}" ToolTip="Sync GitHub Files">
+                <TextBlock Text="🔄Git"/>
+            </Button>
+            <Separator/>
+            <Button Command="{Binding LoadSmartWorkflowCommand}" ToolTip="Load Smart Workflow from URL">
+                <TextBlock Text="💡WF"/>
+            </Button>
+            <!-- 移除了字体选择按钮 -->
+        </ToolBar>
+
+        <!-- 2. TreeView for Scripts -->
+        <!-- 
+            ItemsSource 绑定到 ViewModel 中的 ScriptGroups 集合。
+            ItemContainerStyle 用于处理双击和上下文菜单。
+            HierarchicalDataTemplate 和 DataTemplate 用于定义组和脚本条目的显示方式。
+        -->
+        <TreeView Grid.Row="1" 
+                  ItemsSource="{Binding ScriptGroups}" 
+                  BorderThickness="0,1,0,0" 
+                  BorderBrush="{DynamicResource {x:Static SystemColors.ControlDarkBrushKey}}">
+
+            <TreeView.ItemContainerStyle>
+                <Style TargetType="{x:Type TreeViewItem}">
+                    <!-- 允许 TreeViewItem 获取焦点，以便键盘导航和事件 -->
+                    <Setter Property="Focusable" Value="True"/>
+                    <EventSetter Event="MouseDoubleClick" Handler="TreeViewItem_MouseDoubleClick"/>
+                    <!-- ContextMenu 稍后会详细定义，现在先留空或简单占位 -->
+                    <Setter Property="ContextMenu">
+                        <Setter.Value>
+                            <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                <!-- 占位符，之后会绑定到 ViewModel 的命令 -->
+                                <MenuItem Header="Execute" Command="{Binding ExecuteCommand}" 
+                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                <MenuItem Header="Rename Group" Command="{Binding RenameGroupCommand}"
+                                          Visibility="{Binding IsScriptGroup, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                <!-- 更多菜单项... -->
+                            </ContextMenu>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </TreeView.ItemContainerStyle>
+
+            <TreeView.Resources>
+                <!-- 
+                HierarchicalDataTemplate 用于可展开的项 (ScriptGroupViewModel)。
+                ItemsSource 绑定到 ScriptGroupViewModel 中的 Scripts 集合。
+                -->
+                <HierarchicalDataTemplate DataType="{x:Type viewModels:ScriptGroupViewModel}" 
+                                          ItemsSource="{Binding Scripts}">
+                    <StackPanel Orientation="Horizontal">
+                        <!-- TODO: 替换为实际的文件夹图标 -->
+                        <TextBlock Text="📁" Margin="0,0,5,0"/>
+                        <TextBlock Text="{Binding Name}" ToolTip="{Binding Name}"/>
+                    </StackPanel>
+                </HierarchicalDataTemplate>
+
+                <!-- 
+                DataTemplate 用于叶子节点 (ScriptEntryViewModel)。
+                -->
+                <DataTemplate DataType="{x:Type viewModels:ScriptEntryViewModel}">
+                    <StackPanel Orientation="Horizontal" ToolTip="{Binding ToolTipText}">
+                        <!-- TODO: 根据 IsMissing 状态和类型显示不同图标 -->
+                        <Image Width="16" Height="16" Margin="0,0,5,0">
+                            <Image.Style>
+                                <Style TargetType="{x:Type Image}">
+                                    <!-- 默认 Python 图标 -->
+                                    <Setter Property="Source" Value="/YourAssemblyName;component/Resources/PythonFileIcon.png"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsMissing}" Value="True">
+                                            <!-- 警告/丢失图标 -->
+                                            <Setter Property="Source" Value="/YourAssemblyName;component/Resources/WarningIcon.png"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Image.Style>
+                        </Image>
+                        <TextBlock Text="{Binding DisplayName}">
+                            <TextBlock.Style>
+                                <Style TargetType="{x:Type TextBlock}">
+                                    <Setter Property="Foreground" Value="{DynamicResource {x:Static SystemColors.ControlTextBrushKey}}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsMissing}" Value="True">
+                                            <Setter Property="Foreground" Value="Red"/>
+                                            <!-- 也可以在 ToolTip 中加入 "(Missing)" -->
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+                </DataTemplate>
+            </TreeView.Resources>
+        </TreeView>
+    </Grid>
+</UserControl>
