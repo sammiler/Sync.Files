@@ -1,4 +1,5 @@
 ﻿using SyncFiles.Core.Models;
+using SyncFiles.UI.Common;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel; // For ObservableCollection
@@ -45,11 +46,38 @@ namespace SyncFiles.UI.ViewModels
             Scripts = new ObservableCollection<ScriptEntryViewModel>(
                 model.Scripts.Select(s => new ScriptEntryViewModel(s, pythonExecutablePath, pythonScriptBasePath, environmentVariables, projectBasePath, parentViewModel))
             );
+            RenameGroupCommand = new RelayCommand(RequestRenameGroup, () => !IsDefaultGroup && parentViewModel != null);
+            DeleteGroupCommand = new RelayCommand(RequestDeleteGroup, () => !IsDefaultGroup && parentViewModel != null);
+      
         }
         public void AddScript(ScriptEntryViewModel scriptVM)
         {
             Scripts.Add(scriptVM);
             _model.Scripts.Add(scriptVM.GetModel()); // Add to underlying model too
+        }
+        private void RequestRenameGroup()
+        {
+            if (IsDefaultGroup) return;
+            string newName = _parentViewModel.ShowInputDialog("Enter new group name:", Name);
+            if (newName != null && !string.IsNullOrWhiteSpace(newName) && newName.Trim() != Name)
+            {
+                // Check for duplicate name in parent ViewModel before setting
+                if (!_parentViewModel.IsGroupNameDuplicate(newName.Trim(), Id))
+                {
+                    Name = newName.Trim(); // This should update _model.Name via its setter
+                    _parentViewModel.RequestSaveSettings();
+                }
+                else
+                {
+                    _parentViewModel.ShowMessage("Error", "Group name already exists.");
+                }
+            }
+        }
+
+        private void RequestDeleteGroup()
+        {
+            if (IsDefaultGroup) return;
+            _parentViewModel.RequestDeleteGroup(this);
         }
         public bool RemoveScript(ScriptEntryViewModel scriptVM)
         {

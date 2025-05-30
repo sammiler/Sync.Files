@@ -22,6 +22,8 @@ namespace SyncFiles.UI.ViewModels
         private FileSystemWatcherService _fileSystemWatcherService;
         private SmartWorkflowService _smartWorkflowService;
         private string _projectBasePath;
+        private FileSystemWatcher _pythonScriptDirWatcher;
+        public ICommand SaveSettingsCommand { get; } // For explicit save, or auto-save on change
         private CancellationTokenSource _workflowCts; // For cancelling an ongoing workflow
         public ObservableCollection<ScriptGroupViewModel> ScriptGroups { get; }
         public ICommand RefreshScriptsCommand { get; }
@@ -72,6 +74,7 @@ namespace SyncFiles.UI.ViewModels
             SyncGitHubFilesCommand = new RelayCommand(async () => await SyncGitHubFilesAsync(false), () => !IsBusy); // false indicates not part of workflow
             LoadSmartWorkflowCommand = new RelayCommand(async () => await LoadSmartWorkflowAsync(), () => !IsBusy);
             CancelWorkflowCommand = new RelayCommand(CancelWorkflow, () => IsBusy); // Can only cancel if busy
+            SaveSettingsCommand = new RelayCommand(RequestSaveSettings, () => !IsBusy);
         }
         public async Task InitializeAsync(
             string projectBasePath,
@@ -103,8 +106,267 @@ namespace SyncFiles.UI.ViewModels
                 _smartWorkflowService.WorkflowDownloadPhaseCompleted += SmartWorkflowService_DownloadPhaseCompleted_Handler;
             }
             await LoadAndRefreshScriptsAsync(true);
+            InitializePythonScriptWatcher();
             AppendLogMessage("SyncFiles Tool Window initialized.");
         }
+
+        private void InitializePythonScriptWatcher()
+        {
+            StopPythonScriptWatcher(); // Stop existing if any
+
+            var settings = _settingsManager.LoadSettings(_projectBasePath);
+            string scriptPath = settings.PythonScriptPath;
+
+            if (!string.IsNullOrWhiteSpace(scriptPath) && Directory.Exists(scriptPath))
+            {
+                try
+                {
+                    _pythonScriptDirWatcher = new FileSystemWatcher(scriptPath)
+                    {
+                        Filter = "*.py",
+                        NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.CreationTime,
+                        IncludeSubdirectories = false // Or true if you want to watch subfolders for scripts
+                    };
+                    _pythonScriptDirWatcher.Changed += OnPythonScriptDirectoryChanged;
+                    _pythonScriptDirWatcher.Created += OnPythonScriptDirectoryChanged;
+                    _pythonScriptDirWatcher.Deleted += OnPythonScriptDirectoryChanged;
+                    _pythonScriptDirWatcher.Renamed += OnPythonScriptDirectoryChanged;
+                    _pythonScriptDirWatcher.EnableRaisingEvents = true;
+                    AppendLogMessage($"Watching Python script directory for changes: {scriptPath}");
+                }
+                catch (Exception ex)
+                {
+                    AppendLogMessage($"[ERROR] Failed to initialize watcher for Python script directory '{scriptPath}': {ex.Message}");
+                    _pythonScriptDirWatcher = null;
+                }
+            }
+            else
+            {
+                AppendLogMessage("[INFO] Python script path not configured or directory does not exist. Watcher not started.");
+            }
+        }
+        private void StopPythonScriptWatcher()
+        {
+            if (_pythonScriptDirWatcher != null)
+            {
+                _pythonScriptDirWatcher.EnableRaisingEvents = false;
+                _pythonScriptDirWatcher.Changed -= OnPythonScriptDirectoryChanged;
+                _pythonScriptDirWatcher.Created -= OnPythonScriptDirectoryChanged;
+                _pythonScriptDirWatcher.Deleted -= OnPythonScriptDirectoryChanged;
+                _pythonScriptDirWatcher.Renamed -= OnPythonScriptDirectoryChanged;
+                _pythonScriptDirWatcher.Dispose();
+                _pythonScriptDirWatcher = null;
+                AppendLogMessage("Python script directory watcher stopped.");
+            }
+        }
+        private async void OnPythonScriptDirectoryChanged(object sender, FileSystemEventArgs e)
+        {
+            AppendLogMessage($"Python script directory change detected: {e.ChangeType} on {e.Name}. Refreshing scripts...");
+            // Debounce or delay refresh if many events fire quickly? For now, direct refresh.
+            if (Application.Current?.Dispatcher != null)
+            {
+                await Application.Current.Dispatcher.InvokeAsync(async () =>
+                {
+                    await LoadAndRefreshScriptsAsync(true); // Force rescan
+                });
+            }
+        }
+        public void RequestSaveSettings()
+        {
+            if (IsBusy) return;
+            AppendLogMessage("Saving configuration changes...");
+            try
+            {
+                var settings = _settingsManager.LoadSettings(_projectBasePath); // Get current state as base
+
+                // Update settings from ViewModels
+                settings.ScriptGroups.Clear();
+                foreach (var groupVM in ScriptGroups)
+                {
+                    var groupModel = groupVM.GetModel(); // Assumes GetModel() returns the up-to-date ScriptGroup
+                    // Ensure scripts within the groupModel are also up-to-date from their VMs
+                    groupModel.Scripts.Clear();
+                    foreach (var scriptVM in groupVM.Scripts)
+                    {
+                        groupModel.Scripts.Add(scriptVM.GetModel());
+                    }
+                    settings.ScriptGroups.Add(groupModel);
+                }
+                // If Python paths etc. were editable in main tool window, update them too.
+                // For now, settings like Python paths are managed by SettingsWindow.
+
+                _settingsManager.SaveSettings(settings, _projectBasePath);
+                AppendLogMessage("Configuration saved successfully.");
+
+                // After saving, especially if PythonScriptPath changed, re-init watcher
+                InitializePythonScriptWatcher();
+                // Also, if general FileSystemWatcherService depends on these settings, update it.
+                UpdateFileWatchers(settings);
+
+
+            }
+            catch (Exception ex)
+            {
+                AppendLogMessage($"[ERROR] Failed to save settings: {ex.Message}");
+                ShowMessage("Error Saving Settings", ex.Message);
+            }
+        }
+
+        public void RequestMoveScriptToGroup(ScriptEntryViewModel scriptVM)
+        {
+            if (scriptVM == null) return;
+
+            var availableGroups = ScriptGroups
+                .Where(g => g.Scripts.All(s => s.Id != scriptVM.Id)) // Exclude current group if desired, or all groups
+                .Select(g => g.Name)
+                .ToList();
+
+            if (!availableGroups.Any())
+            {
+                ShowMessage("Move Script", "No other groups available to move the script to.");
+                return;
+            }
+
+            // Simple dialog to select group (replace with a proper WPF dialog)
+            string targetGroupName = ShowComboBoxDialog("Move Script", $"Move '{scriptVM.DisplayName}' to group:", availableGroups);
+
+            if (!string.IsNullOrEmpty(targetGroupName))
+            {
+                ScriptGroupViewModel targetGroupVM = ScriptGroups.FirstOrDefault(g => g.Name == targetGroupName);
+                ScriptGroupViewModel sourceGroupVM = ScriptGroups.FirstOrDefault(g => g.Scripts.Contains(scriptVM));
+
+                if (targetGroupVM != null && sourceGroupVM != null && sourceGroupVM != targetGroupVM)
+                {
+                    sourceGroupVM.RemoveScript(scriptVM); // Removes from VM's collection and model's collection
+                    targetGroupVM.AddScript(scriptVM);   // Adds to VM's collection and model's collection
+                    AppendLogMessage($"Moved script '{scriptVM.DisplayName}' from '{sourceGroupVM.Name}' to '{targetGroupVM.Name}'.");
+                    RequestSaveSettings();
+                }
+            }
+        }
+
+        public void RequestRemoveScriptFromCurrentGroup(ScriptEntryViewModel scriptVM)
+        {
+            if (scriptVM == null) return;
+            ScriptGroupViewModel sourceGroupVM = ScriptGroups.FirstOrDefault(g => g.Scripts.Contains(scriptVM));
+            if (sourceGroupVM != null)
+            {
+                // Confirmation dialog
+                if (ShowConfirmDialog("Remove Script", $"Are you sure you want to remove '{scriptVM.DisplayName}' from group '{sourceGroupVM.Name}'?"))
+                {
+                    sourceGroupVM.RemoveScript(scriptVM);
+                    AppendLogMessage($"Removed script '{scriptVM.DisplayName}' from group '{sourceGroupVM.Name}'.");
+                    RequestSaveSettings();
+                }
+            }
+        }
+
+        public bool IsGroupNameDuplicate(string name, string excludeGroupId)
+        {
+            return ScriptGroups.Any(g => g.Id != excludeGroupId && g.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        }
+
+        public void RequestDeleteGroup(ScriptGroupViewModel groupVMToDelete)
+        {
+            if (groupVMToDelete == null || groupVMToDelete.IsDefaultGroup) return;
+
+            if (ShowConfirmDialog("Delete Group", $"Are you sure you want to delete group '{groupVMToDelete.Name}'? Scripts within will be moved to 'Default' group."))
+            {
+                ScriptGroupViewModel defaultGroupVM = ScriptGroups.FirstOrDefault(g => g.IsDefaultGroup);
+                if (defaultGroupVM == null)
+                {
+                    ShowMessage("Error", "Default group not found. Cannot delete group.");
+                    return;
+                }
+
+                // Move scripts to default group
+                var scriptsToMove = new List<ScriptEntryViewModel>(groupVMToDelete.Scripts); // Iterate over a copy
+                foreach (var scriptVM in scriptsToMove)
+                {
+                    groupVMToDelete.RemoveScript(scriptVM); // Important to remove from model too
+                    defaultGroupVM.AddScript(scriptVM);     // Important to add to model too
+                }
+
+                ScriptGroups.Remove(groupVMToDelete);
+                AppendLogMessage($"Deleted group '{groupVMToDelete.Name}'. Its scripts were moved to Default group.");
+                RequestSaveSettings();
+            }
+        }
+
+
+        // Placeholder for input dialogs - IMPLEMENT THESE AS REAL WPF WINDOWS
+        public string ShowInputDialog(string title, string prompt, string defaultValue = "", bool multiline = false)
+        {
+            // TODO: Replace with a proper WPF Input Dialog Window.
+            // This is a very basic placeholder.
+            var inputDialog = new Window { Title = title, Width = 300, Height = multiline ? 200 : 150, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            if (Application.Current?.MainWindow?.IsVisible == true) inputDialog.Owner = Application.Current.MainWindow;
+
+            var panel = new StackPanel { Margin = new Thickness(10) };
+            panel.Children.Add(new TextBlock { Text = prompt, Margin = new Thickness(0, 0, 0, 5) });
+            TextBox inputTextBox;
+            if (multiline)
+                inputTextBox = new TextBox { Text = defaultValue, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 70, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            else
+                inputTextBox = new TextBox { Text = defaultValue };
+            panel.Children.Add(inputTextBox);
+
+            var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
+            var okButton = new Button { Content = "OK", IsDefault = true, Width = 75, Margin = new Thickness(0, 0, 5, 0) };
+            var cancelButton = new Button { Content = "Cancel", IsCancel = true, Width = 75 };
+            buttonPanel.Children.Add(okButton);
+            buttonPanel.Children.Add(cancelButton);
+            panel.Children.Add(buttonPanel);
+            inputDialog.Content = panel;
+
+            string result = null;
+            okButton.Click += (s, e) => { result = inputTextBox.Text; inputDialog.DialogResult = true; inputDialog.Close(); };
+            cancelButton.Click += (s, e) => { inputDialog.DialogResult = false; inputDialog.Close(); };
+
+            inputDialog.ShowDialog();
+            return (inputDialog.DialogResult == true) ? result : null;
+        }
+
+        public string ShowComboBoxDialog(string title, string prompt, List<string> items)
+        {
+            // TODO: Replace with a proper WPF ComboBox Dialog Window.
+            if (items == null || !items.Any()) return null;
+
+            var dialog = new Window { Title = title, Width = 300, Height = 180, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            if (Application.Current?.MainWindow?.IsVisible == true) dialog.Owner = Application.Current.MainWindow;
+
+            var panel = new StackPanel { Margin = new Thickness(10) };
+            panel.Children.Add(new TextBlock { Text = prompt, Margin = new Thickness(0, 0, 0, 5) });
+            var comboBox = new ComboBox { ItemsSource = items, SelectedIndex = 0 };
+            panel.Children.Add(comboBox);
+
+            var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
+            var okButton = new Button { Content = "OK", IsDefault = true, Width = 75, Margin = new Thickness(0, 0, 5, 0) };
+            var cancelButton = new Button { Content = "Cancel", IsCancel = true, Width = 75 };
+            buttonPanel.Children.Add(okButton);
+            buttonPanel.Children.Add(cancelButton);
+            panel.Children.Add(buttonPanel);
+            dialog.Content = panel;
+
+            string result = null;
+            okButton.Click += (s, e) => { result = comboBox.SelectedItem as string; dialog.DialogResult = true; dialog.Close(); };
+            cancelButton.Click += (s, e) => { dialog.DialogResult = false; dialog.Close(); };
+
+            dialog.ShowDialog();
+            return (dialog.DialogResult == true) ? result : null;
+        }
+
+        public bool ShowConfirmDialog(string title, string message)
+        {
+            // Use MessageBox for simplicity, or create a custom dialog
+            MessageBoxResult result = MessageBox.Show(Application.Current?.MainWindow, message, title, MessageBoxButton.YesNo, MessageBoxImage.Question);
+            return result == MessageBoxResult.Yes;
+        }
+        public void ShowMessage(string title, string message)
+        {
+            MessageBox.Show(Application.Current?.MainWindow, message, title, MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
         private void AppendLogMessage(string message)
         {
             if (Application.Current?.Dispatcher != null && !Application.Current.Dispatcher.CheckAccess())
@@ -206,6 +468,7 @@ namespace SyncFiles.UI.ViewModels
             IsBusy = true; // Set busy before starting the async work
             ((RelayCommand)RefreshScriptsCommand)?.RaiseCanExecuteChanged(); // Update command states
             AppendLogMessage(forceScanDisk ? "Loading settings and scanning script directory..." : "Loading settings and refreshing script tree...");
+            InitializePythonScriptWatcher();
             try
             {
                 await Task.Run(() => // Perform potentially long-running load/scan on a background thread
@@ -422,7 +685,6 @@ namespace SyncFiles.UI.ViewModels
         public void RequestRemoveScript(ScriptEntryViewModel scriptVM, ScriptGroupViewModel groupVM) { AppendLogMessage($"TODO: Remove {scriptVM.DisplayName} from {groupVM.Name}"); }
         public void RequestAddScriptToGroup(ScriptGroupViewModel groupVM) { AppendLogMessage($"TODO: Add script to {groupVM.Name}"); }
         public void RequestRenameGroup(ScriptGroupViewModel groupVM) { AppendLogMessage($"TODO: Rename Group {groupVM.Name}"); }
-        public void RequestDeleteGroup(ScriptGroupViewModel groupVM) { AppendLogMessage($"TODO: Delete Group {groupVM.Name}"); }
 
         // 新增/修改: 当项目路径或服务实例改变时，用于更新 ViewModel 上下文的方法
         public async Task UpdateProjectContextAsync(
@@ -526,6 +788,7 @@ namespace SyncFiles.UI.ViewModels
 
         public void Dispose()
         {
+            StopPythonScriptWatcher();
             if (_fileSystemWatcherService != null)
             {
                 _fileSystemWatcherService.WatchedFileChanged -= OnWatchedFileChanged_Handler;

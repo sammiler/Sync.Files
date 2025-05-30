@@ -1,5 +1,6 @@
 ﻿using SyncFiles.Core.Models; // For ScriptEntry model
 using SyncFiles.Core.Services;
+using SyncFiles.UI.Common;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -19,6 +20,11 @@ namespace SyncFiles.UI.ViewModels
         private readonly Dictionary<string, string> _environmentVariables; // 从主配置获取
         private readonly string _projectBasePath; // 从主配置或服务获取
         private bool _isMissing;
+        private readonly SyncFilesToolWindowViewModel _parentViewModel; // Store parent
+        public bool CanExecuteScript => !IsMissing; // Or any other logic
+
+        public bool IsExecutionModeTerminal => ExecutionMode.Equals("terminal", StringComparison.OrdinalIgnoreCase);
+        public bool IsExecutionModeDirectApi => ExecutionMode.Equals("directApi", StringComparison.OrdinalIgnoreCase);
         public bool IsMissing
         {
             get => _isMissing;
@@ -56,7 +62,8 @@ namespace SyncFiles.UI.ViewModels
                 {
                     _model.ExecutionMode = value;
                     OnPropertyChanged();
-                    OnPropertyChanged(nameof(ToolTipText));
+                    OnPropertyChanged(nameof(IsExecutionModeTerminal)); // Notify this dependent property
+                    OnPropertyChanged(nameof(IsExecutionModeDirectApi)); // Notify this dependent property
                 }
             }
         }
@@ -109,6 +116,9 @@ namespace SyncFiles.UI.ViewModels
         public ICommand SetDescriptionCommand { get; private set; }
         public ICommand MoveToGroupCommand { get; private set; }    // Needs interaction with parent/main VM
         public ICommand RemoveFromGroupCommand { get; private set; } // Needs interaction with parent/main VM
+
+        public ICommand SetExecutionModeToTerminalCommand { get; }
+        public ICommand SetExecutionModeToDirectApiCommand { get; }
         public bool IsScriptEntry => true;
         public bool IsScriptGroup => false;
         public ScriptEntryViewModel(
@@ -124,11 +134,18 @@ namespace SyncFiles.UI.ViewModels
             _pythonScriptBasePath = pythonScriptBasePath;
             _environmentVariables = environmentVariables ?? new Dictionary<string, string>();
             _projectBasePath = projectBasePath;
+            _parentViewModel = parentViewModel ?? throw new ArgumentNullException(nameof(parentViewModel));
             IsMissing = _model.IsMissing; // Initialize from model's persisted state if any
             ExecuteCommand = new DelegateCommand(Execute, CanExecute);
             RunInTerminalCommand = new DelegateCommand(ExecuteInTerminal, CanExecute);
             RunDirectCommand = new DelegateCommand(ExecuteDirectly, CanExecute);
             OpenScriptFileCommand = new DelegateCommand(OpenScript, CanExecute);
+            SetExecutionModeToTerminalCommand = new RelayCommand(() => SetExecutionMode("terminal"), CanExecute);
+            SetExecutionModeToDirectApiCommand = new RelayCommand(() => SetExecutionMode("directApi"), CanExecute);
+            SetAliasCommand = new RelayCommand(RequestSetAlias, CanExecute);
+            SetDescriptionCommand = new RelayCommand(RequestSetDescription, CanExecute);
+            MoveToGroupCommand = new RelayCommand(RequestMoveToGroup, CanExecute);
+            RemoveFromGroupCommand = new RelayCommand(RequestRemoveFromGroup, CanExecute);
         }
         public class DelegateCommand : ICommand
         {
@@ -191,6 +208,56 @@ namespace SyncFiles.UI.ViewModels
                     }
                 });
             }
+        }
+        private void SetExecutionMode(string mode)
+        {
+            if (!CanExecute()) return;
+            ExecutionMode = mode; // This should trigger OnPropertyChanged if setter is correct
+            _parentViewModel.RequestSaveSettings(); // Tell parent to save all settings
+        }
+
+        private void RequestSetAlias()
+        {
+            if (!CanExecute()) return;
+            // Simplistic input - replace with a proper dialog window
+            string newAlias = ShowInputDialog("Enter new alias:", Alias);
+            if (newAlias != null) // Not cancelled
+            {
+                Alias = newAlias.Trim();
+                _parentViewModel.RequestSaveSettings();
+            }
+        }
+
+        private void RequestSetDescription()
+        {
+            if (!CanExecute()) return;
+            string newDescription = ShowInputDialog("Enter new description:", Description, true); // true for multiline
+            if (newDescription != null)
+            {
+                Description = newDescription; // Trim handled by property setter or here
+                _parentViewModel.RequestSaveSettings();
+            }
+        }
+
+        private void RequestMoveToGroup()
+        {
+            if (!CanExecute()) return;
+            _parentViewModel.RequestMoveScriptToGroup(this);
+        }
+
+        private void RequestRemoveFromGroup()
+        {
+            if (!CanExecute()) return;
+            _parentViewModel.RequestRemoveScriptFromCurrentGroup(this);
+        }
+
+        private string ShowInputDialog(string prompt, string defaultValue, bool multiline = false)
+        {
+            // This is a VERY basic example. You should create a proper WPF input dialog window.
+            // For now, let's imagine a placeholder or skip to direct ViewModel interaction for brevity.
+            // In a real app, you'd open a new Window.
+            // For demonstration, let's assume _parentViewModel has a method to show a dialog.
+            return _parentViewModel.ShowInputDialog(prompt, defaultValue,"", multiline);
         }
         private void ExecuteInTerminal() { string tempMode = ExecutionMode; ExecutionMode = "terminal"; Execute(); ExecutionMode = tempMode; }
         private void ExecuteDirectly() { string tempMode = ExecutionMode; ExecutionMode = "directApi"; Execute(); ExecutionMode = tempMode; }

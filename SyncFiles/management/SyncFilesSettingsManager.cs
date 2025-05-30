@@ -10,6 +10,10 @@ namespace SyncFiles.Core.Management
         private const string ConfigFileName = "syncFilesConfig.xml"; 
         private string GetConfigFilePath(string projectBasePath, bool createPluginDirIfNeeded = true)
         {
+            if(projectBasePath == null)
+            {
+                return null;
+            }
             if (string.IsNullOrEmpty(projectBasePath))
             {
                 string folderPath = Path.Combine(Path.GetDirectoryName(projectBasePath), ".vs"); // 假设projectBasePath是 .sln 文件路径
