@@ -132,25 +132,27 @@ namespace SyncFiles.UI.ViewModels
             RemoveEnvironmentVariableCommand = new RelayCommand(() => { if (SelectedEnvironmentVariable != null) EnvironmentVariables.Remove(SelectedEnvironmentVariable); },
                                                              () => SelectedEnvironmentVariable != null);
 
-            ApplyCommand = new RelayCommand(ApplySettings);
+            ApplyCommand = new RelayCommand(() => {
+                ApplySettings();
+                RequestCloseDialog?.Invoke(this, true); // Add this line to also close the dialog
+            }, () => IsModified);
             ApplyAndCloseCommand = new RelayCommand(() => { ApplySettings(); RequestCloseDialog?.Invoke(this, true); });
             CancelCommand = new RelayCommand(() => RequestCloseDialog?.Invoke(this, false));
         }
+
 
         private void LoadSettings()
         {
             _originalSettings = _settingsManager.LoadSettings(_projectBasePath);
 
-            Mappings.Clear();
-            foreach (var m in _originalSettings.Mappings) Mappings.Add(new MappingViewModel(m.SourceUrl, m.TargetPath));
-
-            WatchEntries.Clear();
+                Mappings.Clear();
+                WatchEntries.Clear();
             foreach (var w in _originalSettings.WatchEntries) WatchEntries.Add(new WatchEntryViewModel(w.WatchedPath, w.OnEventScript));
 
             PythonScriptPath = _originalSettings.PythonScriptPath;
             PythonExecutablePath = _originalSettings.PythonExecutablePath;
 
-            EnvironmentVariables.Clear();
+                EnvironmentVariables.Clear();
             foreach (var ev in _originalSettings.EnvironmentVariablesList) EnvironmentVariables.Add(new EnvironmentVariableViewModel(ev.Name, ev.Value));
         }
 

@@ -64,7 +64,7 @@
 				<Parent guid="guidSyncFilesCmdSet" id="idSyncFilesGroupOnToolbar"/>
 				<!-- <Icon guid="guidSyncFilesImages" id="bmpSettingsIcon" /> -->
 				<Strings>
-					<ButtonText>Settings...</ButtonText>
+					<ButtonText>Settings</ButtonText>
 					<ToolTipText>Configure SyncFiles settings.</ToolTipText>
 				</Strings>
 			</Button>

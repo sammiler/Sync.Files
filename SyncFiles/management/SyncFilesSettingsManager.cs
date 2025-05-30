@@ -7,25 +7,25 @@ namespace SyncFiles.Core.Management
 {
     public class SyncFilesSettingsManager
     {
-        private const string ConfigFileName = "syncFilesConfig.xml"; // 与IntelliJ插件一致
+        private const string ConfigFileName = "syncFilesConfig.xml"; 
         private string GetConfigFilePath(string projectBasePath, bool createPluginDirIfNeeded = true)
         {
             if (string.IsNullOrEmpty(projectBasePath))
             {
-                string ideaFolderPath = Path.Combine(Path.GetDirectoryName(projectBasePath), ".idea"); // 假设projectBasePath是 .sln 文件路径
-                ideaFolderPath = Path.Combine(projectBasePath, ".idea");
+                string folderPath = Path.Combine(Path.GetDirectoryName(projectBasePath), ".vs"); // 假设projectBasePath是 .sln 文件路径
+                folderPath = Path.Combine(projectBasePath, ".vs");
                 if (createPluginDirIfNeeded)
                 {
-                    Directory.CreateDirectory(ideaFolderPath); // 确保.idea目录存在
+                    Directory.CreateDirectory(folderPath); 
                 }
-                return Path.Combine(ideaFolderPath, ConfigFileName);
+                return Path.Combine(folderPath, ConfigFileName);
             }
-            string ideaDir = Path.Combine(projectBasePath, ".idea");
+            string vsDir = Path.Combine(projectBasePath, ".vs");
             if (createPluginDirIfNeeded)
             {
-                Directory.CreateDirectory(ideaDir);
+                Directory.CreateDirectory(vsDir);
             }
-            return Path.Combine(ideaDir, ConfigFileName);
+            return Path.Combine(vsDir, ConfigFileName);
         }
         public SyncFilesSettingsState LoadSettings(string projectBasePath)
         {
@@ -80,7 +80,7 @@ namespace SyncFiles.Core.Management
             state.ComponentName = "SyncFilesConfig"; // 确保<component name="...">正确
             ProjectWrapper projectWrapper = new ProjectWrapper
             {
-                Version = "4", // Or read from somewhere if dynamic
+                Version = "1", // Or read from somewhere if dynamic
                 SyncFilesComponent = state
             };
             string filePath = GetConfigFilePath(projectBasePath, true); // Create dir if needed
