@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text; // For StringBuilder
+using System.Threading.Tasks;
 using System.Windows.Input; // For ICommand (稍后会添加命令实现)
 namespace SyncFiles.UI.ViewModels
 {
@@ -162,51 +163,97 @@ namespace SyncFiles.UI.ViewModels
             public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
         }
         private bool CanExecute() => !IsMissing;
-        private void Execute()
+
+        private void Execute() // This is the method bound to ExecuteCommand
         {
-            System.Console.WriteLine($"Executing script (mode: {ExecutionMode}): {Path}");
-            if (IsMissing) return;
+            if (!CanExecuteScript) // Assuming CanExecuteScript is your guard property
+            {
+                _parentViewModel?.SetScriptExecutionStatus($"Cannot execute: {DisplayName} (missing or other condition).");
+                return;
+            }
+
             string fullScriptPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(_pythonScriptBasePath, Path));
             if (!File.Exists(fullScriptPath))
             {
                 IsMissing = true; // Update status
+                _parentViewModel?.SetScriptExecutionStatus($"ERROR: Script file not found for {DisplayName}: {fullScriptPath}");
                 Console.WriteLine($"[ERROR] Script file not found: {fullScriptPath}");
                 return;
             }
-            var executor = new Core.Services.ScriptExecutor(_projectBasePath); // Consider injecting or making static/singleton
-            var arguments = new List<string>();
+
+            var executor = new Core.Services.ScriptExecutor(_projectBasePath);
+            var arguments = new List<string>(); // Populate if your scripts take arguments
+
             if (ExecutionMode.Equals("terminal", StringComparison.OrdinalIgnoreCase))
             {
-                executor.LaunchInExternalTerminal(
-                    _pythonExecutablePath,
-                    fullScriptPath,
-                    string.Join(" ", arguments.Select(a => $"\"{a}\"")), // Example: basic argument joining
-                    DisplayName,
-                    _environmentVariables,
-                    _projectBasePath // Or script's directory: System.IO.Path.GetDirectoryName(fullScriptPath)
-                );
+                _parentViewModel?.SetScriptExecutionStatus($"Launching in terminal: {DisplayName}...");
+                try
+                {
+                    executor.LaunchInExternalTerminal(
+                        _pythonExecutablePath,
+                        fullScriptPath,
+                        string.Join(" ", arguments.Select(a => $"\"{a}\"")),
+                        DisplayName,
+                        _environmentVariables,
+                        _projectBasePath
+                    );
+                    _parentViewModel?.SetScriptExecutionStatus($"Terminal launched for: {DisplayName}.");
+                }
+                catch (Exception ex)
+                {
+                    _parentViewModel?.SetScriptExecutionStatus($"ERROR launching terminal for {DisplayName}: {ex.Message}");
+                    _parentViewModel?.AppendScriptError(DisplayName, $"Terminal launch error: {ex.Message}");
+                }
             }
             else // Direct API
             {
+                _parentViewModel?.ClearScriptOutput(); // Clear previous output
+                _parentViewModel?.SetScriptExecutionStatus($"Executing (direct): {DisplayName}...");
+                IsScriptOutputVisible = true; // Make sure output panel is visible
+
+                // ExecuteAndCaptureOutputAsync returns a Task<ScriptExecutionResult>
+                // We use ContinueWith to handle completion/failure without blocking the Execute method
                 _ = executor.ExecuteAndCaptureOutputAsync(
                     _pythonExecutablePath,
                     fullScriptPath,
                     arguments,
                     _environmentVariables,
-                    _projectBasePath, // Or script's directory
-                    stdout => Console.WriteLine($"SCRIPT STDOUT: {stdout}"), // TODO: Route to UI
-                    stderr => Console.WriteLine($"SCRIPT STDERR: {stderr}")  // TODO: Route to UI
+                    _projectBasePath,
+                    // onOutputDataReceived:
+                    stdout => _parentViewModel?.AppendScriptOutput(DisplayName, stdout),
+                    // onErrorDataReceived:
+                    stderr => _parentViewModel?.AppendScriptError(DisplayName, stderr)
                 ).ContinueWith(task => {
-                    if (task.IsFaulted)
+                    // This continuation runs when the async operation completes (success, fault, or cancel)
+                    // It's important to dispatch UI updates back to the UI thread.
+
+                    if (task.Status == TaskStatus.RanToCompletion) // <--- USING TaskStatus.RanToCompletion
                     {
-                        Console.WriteLine($"SCRIPT EXECUTION FAILED: {task.Exception.InnerException?.Message}");
+                        _parentViewModel?.HandleScriptExecutionCompletion(DisplayName, task.Result);
                     }
-                    else if (task.IsCompleted)
+                    else if (task.Status == TaskStatus.Faulted)
                     {
-                        var result = task.Result;
-                        Console.WriteLine($"SCRIPT EXITED: {result.ExitCode}");
+                        _parentViewModel?.HandleScriptExecutionCompletion(DisplayName, null, task.Exception.Flatten().InnerException);
                     }
-                });
+                    else if (task.Status == TaskStatus.Canceled)
+                    {
+                        _parentViewModel?.SetScriptExecutionStatus($"CANCELLED: {DisplayName}.");
+                        _parentViewModel?.AppendScriptOutput(DisplayName, "Execution was cancelled.");
+                    }
+                }, TaskScheduler.Default); // Using TaskScheduler.Default for the continuation, then dispatching inside HandleScriptExecutionCompletion
+            }
+        }
+        // Property to control output visibility from ScriptEntry (optional, could be global in parent)
+        private bool _isScriptOutputVisible;
+        public bool IsScriptOutputVisible
+        {
+            get => _isScriptOutputVisible;
+            set
+            {
+                if (SetProperty(ref _isScriptOutputVisible, value) && _parentViewModel != null)
+                {
+                    _parentViewModel.IsScriptOutputVisible = value; // Sync with parent's property
+                }
             }
         }
         private void SetExecutionMode(string mode)
@@ -261,9 +308,9 @@ namespace SyncFiles.UI.ViewModels
         }
         private void ExecuteInTerminal() { string tempMode = ExecutionMode; ExecutionMode = "terminal"; Execute(); ExecutionMode = tempMode; }
         private void ExecuteDirectly() { string tempMode = ExecutionMode; ExecutionMode = "directApi"; Execute(); ExecutionMode = tempMode; }
-        private void OpenScript()
+        private async void OpenScript()
         {
-            if (IsMissing) return;
+            if (IsMissing || _parentViewModel == null) return;
             string fullScriptPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(_pythonScriptBasePath, Path));
             if (!File.Exists(fullScriptPath))
             {
@@ -280,6 +327,7 @@ namespace SyncFiles.UI.ViewModels
             {
                 Console.WriteLine($"[ERROR] Failed to open script file '{fullScriptPath}': {ex.Message}");
             }
+            await _parentViewModel.OpenFileInIdeAsync(fullScriptPath);
         }
         public ScriptEntry GetModel() => _model;
     }

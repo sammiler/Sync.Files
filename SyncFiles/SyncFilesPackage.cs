@@ -194,6 +194,12 @@ namespace SyncFiles
             }
             Console.WriteLine("[INFO] Project-specific services and ViewModel context ensured.");
         }
+
+        public static async Task<object> GetGlobalServiceAsync(Type serviceType)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            return await ServiceProvider.GetGlobalServiceAsync(serviceType);
+        }
         public async Task ShowToolWindowAsync()
         {
             // 1. Ensure project context is up-to-date before showing window

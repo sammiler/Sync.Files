@@ -228,7 +228,26 @@ namespace SyncFiles.UI.ViewModels
                 }
             }
             // Add more validation as needed for other fields
+            foreach (var watchEntryVm in WatchEntries)
+            {
+                string resolvedWatchedPath = ResolvePath(watchEntryVm.WatchedPath); // You'll need ResolvePath
+                string resolvedScriptPath = ResolvePathInScriptsDir(watchEntryVm.OnEventScript); // You'll need this too
 
+                if (string.IsNullOrWhiteSpace(resolvedWatchedPath)) { /* error */ return; }
+                if (string.IsNullOrWhiteSpace(resolvedScriptPath)) { /* error */ return; }
+
+                if (!File.Exists(resolvedWatchedPath) && !Directory.Exists(resolvedWatchedPath))
+                {
+                    System.Windows.MessageBox.Show($"Watcher Error: Watched path '{watchEntryVm.WatchedPath}' (resolved to '{resolvedWatchedPath}') does not exist.", "Settings Validation", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return; // Stop saving
+                }
+                if (!File.Exists(resolvedScriptPath))
+                {
+                    System.Windows.MessageBox.Show($"Watcher Error: Script '{watchEntryVm.OnEventScript}' (resolved to '{resolvedScriptPath}') for watcher does not exist.", "Settings Validation", MessageBoxButton.OK, MessageBoxImage.Error);
+                    return; // Stop saving
+                }
+                newSettings.WatchEntries.Add(new WatchEntry(resolvedWatchedPath, resolvedScriptPath));
+            }
             _settingsManager.SaveSettings(newSettings, _projectBasePath);
             _originalSettings = newSettings; // Update original settings after saving
 
@@ -247,6 +266,32 @@ namespace SyncFiles.UI.ViewModels
                     SyncFilesPackage.ToolWindowViewModel.UpdateFileWatchers(currentLoadedSettings);
                 });
             }
+        }
+        // Helper methods in SettingsWindowViewModel:
+        private string ResolvePath(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return path;
+            // Basic resolution, assuming $PROJECT_DIR$ or absolute
+            string tempPath = path.Replace("$PROJECT_DIR$", _projectBasePath);
+            tempPath = Environment.ExpandEnvironmentVariables(tempPath);
+            if (!System.IO.Path.IsPathRooted(tempPath))
+            {
+                tempPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(_projectBasePath, tempPath));
+            }
+            return tempPath;
+        }
+        private string ResolvePathInScriptsDir(string relativeOrAbsolutePathToScript)
+        {
+            if (string.IsNullOrWhiteSpace(relativeOrAbsolutePathToScript)) return relativeOrAbsolutePathToScript;
+            if (System.IO.Path.IsPathRooted(relativeOrAbsolutePathToScript)) return relativeOrAbsolutePathToScript;
+
+            // If PythonScriptPath is set and valid, resolve relative to it
+            if (!string.IsNullOrWhiteSpace(this.PythonScriptPath) && Directory.Exists(this.PythonScriptPath))
+            {
+                return System.IO.Path.GetFullPath(System.IO.Path.Combine(this.PythonScriptPath, relativeOrAbsolutePathToScript));
+            }
+            // Fallback: resolve relative to project if script path is not set/valid
+            return System.IO.Path.GetFullPath(System.IO.Path.Combine(_projectBasePath, relativeOrAbsolutePathToScript));
         }
 
         private void BrowseForPythonScriptPath()

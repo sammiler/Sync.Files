@@ -1,4 +1,5 @@
-﻿using SyncFiles.Core.Management;
+﻿using Microsoft.VisualStudio.Shell;
+using SyncFiles.Core.Management;
 using SyncFiles.Core.Models;
 using SyncFiles.Core.Services;
 using SyncFiles.Core.Settings;
@@ -6,6 +7,7 @@ using SyncFiles.UI.Common; // Assuming RelayCommand is here
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading; // For CancellationTokenSource, if used for workflow cancellation
@@ -15,6 +17,22 @@ using System.Windows.Controls;
 using System.Windows.Input;
 namespace SyncFiles.UI.ViewModels
 {
+    public class ScriptExecutionOutputLine
+    {
+        public DateTime Timestamp { get; }
+        public string ScriptName { get; }
+        public string Line { get; }
+        public bool IsError { get; }
+        public string DisplayLine => $"[{Timestamp:HH:mm:ss}] {(string.IsNullOrEmpty(ScriptName) ? "" : $"({ScriptName}) ")}{(IsError ? "ERROR: " : "")}{Line}";
+
+        public ScriptExecutionOutputLine(string scriptName, string line, bool isError = false)
+        {
+            Timestamp = DateTime.Now;
+            ScriptName = scriptName;
+            Line = line;
+            IsError = isError;
+        }
+    }
     public class SyncFilesToolWindowViewModel : ViewModelBase, IDisposable
     {
         private SyncFilesSettingsManager _settingsManager;
@@ -31,6 +49,24 @@ namespace SyncFiles.UI.ViewModels
         public ICommand SyncGitHubFilesCommand { get; }
         public ICommand LoadSmartWorkflowCommand { get; }
         public ICommand CancelWorkflowCommand { get; }
+        private string _currentScriptExecutionStatus;
+        public string CurrentScriptExecutionStatus
+        {
+            get => _currentScriptExecutionStatus;
+            private set => SetProperty(ref _currentScriptExecutionStatus, value);
+        }
+
+        public ObservableCollection<ScriptExecutionOutputLine> ScriptOutputLog { get; }
+
+        private bool _isScriptOutputVisible;
+        public bool IsScriptOutputVisible // To control visibility of the output panel
+        {
+            get => _isScriptOutputVisible;
+            set => SetProperty(ref _isScriptOutputVisible, value);
+        }
+
+        public ICommand ClearScriptOutputCommand { get; }
+        public ICommand ToggleScriptOutputVisibilityCommand { get; }
         private bool _isBusy;
         public bool IsBusy
         {
@@ -59,6 +95,8 @@ namespace SyncFiles.UI.ViewModels
         }
         // ... existing code ...
         private string _statusMessage;
+        private FileSystemWatcher _pythonScriptParentDirWatcher;
+
         public string StatusMessage
         {
             get => _statusMessage;
@@ -75,6 +113,12 @@ namespace SyncFiles.UI.ViewModels
             LoadSmartWorkflowCommand = new RelayCommand(async () => await LoadSmartWorkflowAsync(), () => !IsBusy);
             CancelWorkflowCommand = new RelayCommand(CancelWorkflow, () => IsBusy); // Can only cancel if busy
             SaveSettingsCommand = new RelayCommand(RequestSaveSettings, () => !IsBusy);
+            ScriptOutputLog = new ObservableCollection<ScriptExecutionOutputLine>();
+            CurrentScriptExecutionStatus = "Ready.";
+            IsScriptOutputVisible = false; // Initially hidden or based on a setting
+
+            ClearScriptOutputCommand = new RelayCommand(ClearScriptOutput, () => ScriptOutputLog.Any());
+            ToggleScriptOutputVisibilityCommand = new RelayCommand(() => IsScriptOutputVisible = !IsScriptOutputVisible);
         }
         public async Task InitializeAsync(
             string projectBasePath,
@@ -83,6 +127,7 @@ namespace SyncFiles.UI.ViewModels
             FileSystemWatcherService fileSystemWatcherService,
             SmartWorkflowService smartWorkflowService)
         {
+            IsBusy = true;
             _projectBasePath = projectBasePath;
             _settingsManager = settingsManager;
             // 如果服务实例可能在 InitializeAsync 被多次调用时发生变化，则需要先解绑旧事件
@@ -119,6 +164,28 @@ namespace SyncFiles.UI.ViewModels
 
             if (!string.IsNullOrWhiteSpace(scriptPath) && Directory.Exists(scriptPath))
             {
+                DirectoryInfo scriptDirInfo = new DirectoryInfo(scriptPath);
+                if (scriptDirInfo.Exists) // Watch the directory itself for file changes
+                {
+                    // ... (existing watcher for files inside scriptPath) ...
+                    _pythonScriptDirWatcher = new FileSystemWatcher(scriptPath) { /* ... */ };
+                    // ...
+                    _pythonScriptDirWatcher.EnableRaisingEvents = true;
+
+                }
+                if (scriptDirInfo.Parent != null && scriptDirInfo.Parent.Exists)
+                {
+                    _pythonScriptParentDirWatcher = new FileSystemWatcher(scriptDirInfo.Parent.FullName)
+                    {
+                        NotifyFilter = NotifyFilters.DirectoryName,
+                        // No specific filter, we check the name in the event
+                    };
+                    _pythonScriptParentDirWatcher.Deleted += OnPythonScriptParentDirectoryChanged;
+                    _pythonScriptParentDirWatcher.Renamed += OnPythonScriptParentDirectoryChanged; // Handle rename too
+                    _pythonScriptParentDirWatcher.EnableRaisingEvents = true;
+                    AppendLogMessage($"Also watching parent directory for changes to: {scriptDirInfo.Name}");
+                }
+
                 try
                 {
                     _pythonScriptDirWatcher = new FileSystemWatcher(scriptPath)
@@ -144,6 +211,102 @@ namespace SyncFiles.UI.ViewModels
             {
                 AppendLogMessage("[INFO] Python script path not configured or directory does not exist. Watcher not started.");
             }
+        }
+
+        public void SetScriptExecutionStatus(string message)
+        {
+            Application.Current.Dispatcher.Invoke(() => // Ensure UI thread
+            {
+                CurrentScriptExecutionStatus = message;
+                // Optionally, also add this status message to the main LogMessages
+                // AppendLogMessage($"[SCRIPT EXEC] {message}"); 
+            });
+        }
+        private async void OnPythonScriptParentDirectoryChanged(object sender, FileSystemEventArgs e)
+        {
+            var settings = _settingsManager.LoadSettings(_projectBasePath);
+            string currentScriptFolderName = new DirectoryInfo(settings.PythonScriptPath).Name;
+
+            if (e.Name.Equals(currentScriptFolderName, StringComparison.OrdinalIgnoreCase))
+            {
+                AppendLogMessage($"Python script directory '{e.Name}' event: {e.ChangeType}. Refreshing...");
+                if (Application.Current?.Dispatcher != null)
+                {
+                    await Application.Current.Dispatcher.InvokeAsync(async () =>
+                    {
+                        await LoadAndRefreshScriptsAsync(true);
+                    });
+                }
+            }
+        }
+        public void AppendScriptOutput(string scriptName, string outputLine)
+        {
+            Application.Current.Dispatcher.Invoke(() => // Ensure UI thread
+            {
+                if (!IsScriptOutputVisible && !string.IsNullOrWhiteSpace(outputLine)) IsScriptOutputVisible = true; // Auto-show on first output
+                ScriptOutputLog.Insert(0, new ScriptExecutionOutputLine(scriptName, outputLine, false));
+                if (ScriptOutputLog.Count > 200) // Limit log size
+                {
+                    ScriptOutputLog.RemoveAt(ScriptOutputLog.Count - 1);
+                }
+                ((RelayCommand)ClearScriptOutputCommand).RaiseCanExecuteChanged();
+            });
+        }
+
+        public void AppendScriptError(string scriptName, string errorLine)
+        {
+            Application.Current.Dispatcher.Invoke(() => // Ensure UI thread
+            {
+                if (!IsScriptOutputVisible && !string.IsNullOrWhiteSpace(errorLine)) IsScriptOutputVisible = true; // Auto-show on first error
+                ScriptOutputLog.Insert(0, new ScriptExecutionOutputLine(scriptName, errorLine, true));
+                if (ScriptOutputLog.Count > 200) // Limit log size
+                {
+                    ScriptOutputLog.RemoveAt(ScriptOutputLog.Count - 1);
+                }
+                 ((RelayCommand)ClearScriptOutputCommand).RaiseCanExecuteChanged();
+            });
+        }
+
+        public void ClearScriptOutput()
+        {
+            Application.Current.Dispatcher.Invoke(() => // Ensure UI thread
+            {
+                ScriptOutputLog.Clear();
+                CurrentScriptExecutionStatus = "Script output cleared.";
+                ((RelayCommand)ClearScriptOutputCommand).RaiseCanExecuteChanged();
+            });
+        }
+
+        // This method is called when the script execution task completes
+        public void HandleScriptExecutionCompletion(string scriptName, Core.Services.ScriptExecutionResult result, Exception exception = null)
+        {
+            Application.Current.Dispatcher.Invoke(() =>
+            {
+                if (exception != null)
+                {
+                    CurrentScriptExecutionStatus = $"FAILED: {scriptName} - {exception.Message}";
+                    AppendScriptError(scriptName, $"EXECUTION EXCEPTION: {exception.Message}");
+                    // Append more details from exception if needed
+                }
+                else if (result != null)
+                {
+                    CurrentScriptExecutionStatus = $"DONE: {scriptName} (Exit Code: {result.ExitCode})";
+                    if (!string.IsNullOrWhiteSpace(result.StandardError) && result.ExitCode != 0) // Log remaining stderr if any and exit code indicates error
+                    {
+                        // Note: ExecuteAndCaptureOutputAsync already calls AppendScriptError for each line.
+                        // This is more for a summary or if anything was missed.
+                        // For now, individual lines are preferred.
+                    }
+                    if (result.ExitCode != 0)
+                    {
+                        AppendScriptError(scriptName, $"Exited with code {result.ExitCode}.");
+                    }
+                    else
+                    {
+                        AppendScriptOutput(scriptName, $"Exited with code {result.ExitCode}.");
+                    }
+                }
+            });
         }
         private void StopPythonScriptWatcher()
         {
@@ -456,6 +619,37 @@ namespace SyncFiles.UI.ViewModels
                 IsBusy = false; // Ensure busy is cleared
                 _workflowCts?.Dispose();
                 _workflowCts = null;
+            }
+        }
+        // In SyncFilesToolWindowViewModel.cs
+        public async Task OpenFileInIdeAsync(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+            {
+                ShowMessage("Error", $"File not found: {filePath}");
+                return;
+            }
+
+            try
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(); // Ensure on main thread for DTE
+                var dte = await SyncFilesPackage.GetGlobalServiceAsync(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
+                if (dte != null)
+                {
+                    dte.ItemOperations.OpenFile(filePath);
+                }
+                else
+                {
+                    ShowMessage("Error", "Visual Studio DTE service not available to open file.");
+                    // Fallback to Process.Start as a last resort
+                    Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true });
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLogMessage($"[ERROR] Failed to open script file '{filePath}' in IDE: {ex.Message}");
+                ShowMessage("Error Opening File", $"Could not open file in IDE: {ex.Message}\nAttempting to open with system default...");
+                try { Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true }); } catch { } // Fallback
             }
         }
         public async Task LoadAndRefreshScriptsAsync(bool forceScanDisk)

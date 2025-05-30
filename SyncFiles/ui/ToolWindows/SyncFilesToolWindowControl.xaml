@@ -5,7 +5,7 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:local="clr-namespace:SyncFiles.UI.ToolWindows"
              xmlns:viewModels="clr-namespace:SyncFiles.UI.ViewModels"
-             xmlns:shell="clr-namespace:Microsoft.VisualStudio.PlatformUI;assembly=Microsoft.VisualStudio.Shell.15.0" 
+             xmlns:shell="clr-namespace:Microsoft.VisualStudio.PlatformUI;assembly=Microsoft.VisualStudio.Shell.15.0"
              mc:Ignorable="d"
              d:DesignHeight="450" d:DesignWidth="350"
              d:DataContext="{d:DesignInstance Type=viewModels:SyncFilesToolWindowViewModel, IsDesignTimeCreatable=True}"
@@ -14,44 +14,7 @@
 
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
-
-        <!-- Style for TreeViewItems to apply context menus -->
-        <Style TargetType="{x:Type TreeViewItem}">
-            <Setter Property="Focusable" Value="True"/>
-            <EventSetter Event="MouseDoubleClick" Handler="TreeViewItem_MouseDoubleClick"/>
-            <!-- ContextMenu will be set via triggers based on DataContext type -->
-        </Style>
-
-        <!-- ContextMenu for ScriptGroupViewModel -->
-        <ContextMenu x:Key="ScriptGroupContextMenu"
-                     DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-            <MenuItem Header="Rename Group" Command="{Binding RenameGroupCommand}"
-                      IsEnabled="{Binding IsScriptGroupAndNotDefault}"/>
-            <MenuItem Header="Delete Group" Command="{Binding DeleteGroupCommand}"
-                      IsEnabled="{Binding IsScriptGroupAndNotDefault}"/>
-            <!-- Add other group-specific commands here if any -->
-        </ContextMenu>
-
-        <!-- ContextMenu for ScriptEntryViewModel -->
-        <ContextMenu x:Key="ScriptEntryContextMenu"
-                     DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-            <MenuItem Header="Execute" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanExecuteScript}"/>
-            <MenuItem Header="Open File" Command="{Binding OpenScriptFileCommand}" IsEnabled="{Binding CanExecuteScript}"/>
-            <Separator/>
-            <MenuItem Header="Set Execution Mode" IsEnabled="{Binding CanExecuteScript}">
-                <MenuItem Header="Run in Terminal" Command="{Binding SetExecutionModeToTerminalCommand}" 
-                          IsChecked="{Binding IsExecutionModeTerminal, Mode=OneWay}"/>
-                <MenuItem Header="Run and Capture Output" Command="{Binding SetExecutionModeToDirectApiCommand}" 
-                          IsChecked="{Binding IsExecutionModeDirectApi, Mode=OneWay}"/>
-            </MenuItem>
-            <Separator/>
-            <MenuItem Header="Set Alias..." Command="{Binding SetAliasCommand}" IsEnabled="{Binding CanExecuteScript}"/>
-            <MenuItem Header="Set Description..." Command="{Binding SetDescriptionCommand}" IsEnabled="{Binding CanExecuteScript}"/>
-            <Separator/>
-            <MenuItem Header="Move to Group..." Command="{Binding MoveToGroupCommand}" IsEnabled="{Binding CanExecuteScript}"/>
-            <MenuItem Header="Remove from this Group" Command="{Binding RemoveFromGroupCommand}" IsEnabled="{Binding CanExecuteScript}"/>
-        </ContextMenu>
-
+        <!-- We will define ContextMenus inline or via more specific styles if needed -->
     </UserControl.Resources>
 
     <!-- DataContext is set in code-behind by SyncFilesPackage -->
@@ -63,7 +26,7 @@
             <RowDefinition Height="*"/>
             <!-- TreeView -->
             <RowDefinition Height="Auto"/>
-            <!-- Status/Log Area (Optional) -->
+            <!-- Optional Status Bar -->
         </Grid.RowDefinitions>
 
         <!-- 1. Toolbar -->
@@ -79,17 +42,7 @@
             <Button Command="{Binding SyncGitHubFilesCommand}" ToolTip="Sync GitHub Files Now">
                 <TextBlock Text="🔄Git" FontSize="14"/>
             </Button>
-            <Separator/>
-            <Button Command="{Binding LoadSmartWorkflowCommand}" ToolTip="Load Smart Workflow from URL">
-                <TextBlock Text="💡WF" FontSize="14"/>
-            </Button>
-            <!-- Optional: Button to save settings if not auto-saving -->
-            <!-- 
-            <Separator/>
-            <Button Command="{Binding SaveSettingsCommand}" ToolTip="Save All Settings">
-                <TextBlock Text="💾" FontSize="14"/>
-            </Button>
-            -->
+            <!-- LoadSmartWorkflowCommand Button removed -->
         </ToolBar>
 
         <!-- 2. TreeView for Scripts -->
@@ -102,16 +55,47 @@
 
             <TreeView.ItemContainerStyle>
                 <Style TargetType="{x:Type TreeViewItem}" BasedOn="{StaticResource {x:Type TreeViewItem}}">
-                    <!-- BasedOn to inherit default style + our setters -->
-                    <!-- Apply specific ContextMenu based on the type of the DataContext -->
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding Path=DataContext.IsScriptGroup, RelativeSource={RelativeSource Self}}" Value="True">
-                            <Setter Property="ContextMenu" Value="{StaticResource ScriptGroupContextMenu}" />
-                        </DataTrigger>
-                        <DataTrigger Binding="{Binding Path=DataContext.IsScriptEntry, RelativeSource={RelativeSource Self}}" Value="True">
-                            <Setter Property="ContextMenu" Value="{StaticResource ScriptEntryContextMenu}" />
-                        </DataTrigger>
-                    </Style.Triggers>
+                    <Setter Property="Focusable" Value="True"/>
+                    <EventSetter Event="MouseDoubleClick" Handler="TreeViewItem_MouseDoubleClick"/>
+                    <Setter Property="ContextMenu">
+                        <Setter.Value>
+                            <!-- This ContextMenu's DataContext will be the TreeViewItem's DataContext (the ViewModel) -->
+                            <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                <!-- Script Entry Specific Items -->
+                                <MenuItem Header="Execute" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanExecuteScript}"
+                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                <MenuItem Header="Open File" Command="{Binding OpenScriptFileCommand}" IsEnabled="{Binding CanExecuteScript}"
+                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                <Separator Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                <MenuItem Header="Set Execution Mode" IsEnabled="{Binding CanExecuteScript}"
+                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <MenuItem Header="Run in Terminal" Command="{Binding SetExecutionModeToTerminalCommand}"
+                                              IsChecked="{Binding IsExecutionModeTerminal, Mode=OneWay}"/>
+                                    <MenuItem Header="Run and Capture Output" Command="{Binding SetExecutionModeToDirectApiCommand}"
+                                              IsChecked="{Binding IsExecutionModeDirectApi, Mode=OneWay}"/>
+                                </MenuItem>
+                                <Separator Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                <MenuItem Header="Set Alias..." Command="{Binding SetAliasCommand}" IsEnabled="{Binding CanExecuteScript}"
+                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                <MenuItem Header="Set Description..." Command="{Binding SetDescriptionCommand}" IsEnabled="{Binding CanExecuteScript}"
+                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                <Separator Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                <MenuItem Header="Move to Group..." Command="{Binding MoveToGroupCommand}" IsEnabled="{Binding CanExecuteScript}"
+                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                <MenuItem Header="Remove from this Group" Command="{Binding RemoveFromGroupCommand}" IsEnabled="{Binding CanExecuteScript}"
+                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+
+                                <!-- Script Group Specific Items -->
+                                <MenuItem Header="Rename Group" Command="{Binding RenameGroupCommand}"
+                                          Visibility="{Binding IsScriptGroupAndNotDefault, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                <MenuItem Header="Delete Group" Command="{Binding DeleteGroupCommand}"
+                                          Visibility="{Binding IsScriptGroupAndNotDefault, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                <!-- Add a separator if both types of items can appear and script entry items were visible -->
+                                <!-- This logic can get complex in a single ContextMenu. -->
+                                <!-- Consider separate ContextMenus if this becomes too messy. -->
+                            </ContextMenu>
+                        </Setter.Value>
+                    </Setter>
                 </Style>
             </TreeView.ItemContainerStyle>
 
@@ -120,7 +104,6 @@
                 <HierarchicalDataTemplate DataType="{x:Type viewModels:ScriptGroupViewModel}"
                                           ItemsSource="{Binding Scripts}">
                     <StackPanel Orientation="Horizontal">
-                        <!-- TODO: Replace Text with proper folder icon from VS Image Service or your resources -->
                         <TextBlock Text="📁" Margin="0,0,5,0" VerticalAlignment="Center"/>
                         <TextBlock Text="{Binding Name}" ToolTip="{Binding Name}" VerticalAlignment="Center"/>
                     </StackPanel>
@@ -133,11 +116,11 @@
                             <Image.Style>
                                 <Style TargetType="{x:Type Image}">
                                     <Setter Property="Source" Value="/SyncFiles;component/Resources/PythonFileIcon.png"/>
-                                    <!-- ADJUST ASSEMBLY NAME IF NEEDED -->
+                                    <!-- ADJUST ASSEMBLY NAME -->
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsMissing}" Value="True">
                                             <Setter Property="Source" Value="/SyncFiles;component/Resources/WarningIcon.png"/>
-                                            <!-- ADJUST ASSEMBLY NAME IF NEEDED -->
+                                            <!-- ADJUST ASSEMBLY NAME -->
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -146,7 +129,6 @@
                         <TextBlock Text="{Binding DisplayNameWithStatus}" VerticalAlignment="Center">
                             <TextBlock.Style>
                                 <Style TargetType="{x:Type TextBlock}">
-                                    <!-- Foreground is inherited from UserControl's Foreground -->
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsMissing}" Value="True">
                                             <Setter Property="Foreground" Value="Red"/>
@@ -160,22 +142,18 @@
             </TreeView.Resources>
         </TreeView>
 
-        <!-- 3. Optional Status/Log Area -->
+        <!-- 3. Optional Status Bar -->
         <StatusBar Grid.Row="2" Background="{DynamicResource {x:Static shell:EnvironmentColors.StatusBarDefaultBrushKey}}">
             <StatusBarItem>
-                <TextBlock Text="{Binding StatusMessage}" 
-                           Foreground="{DynamicResource {x:Static shell:EnvironmentColors.StatusBarTextBrushKey}}" 
+                <TextBlock Text="{Binding StatusMessage}"
+                           Foreground="{DynamicResource {x:Static shell:EnvironmentColors.StatusBarTextBrushKey}}"
                            Margin="3,0"/>
             </StatusBarItem>
             <StatusBarItem HorizontalAlignment="Right" Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <ProgressBar IsIndeterminate="True" Width="100" Height="10" Margin="3,0"/>
+                <ProgressBar IsIndeterminate="True" Width="100" Height="10" Margin="3,0"
+                              Background="{DynamicResource {x:Static shell:EnvironmentColors.StatusBarNoSolutionBrushKey}}"
+                              BorderBrush="{DynamicResource {x:Static shell:EnvironmentColors.StatusBarHighlightBrushKey}}"/>
             </StatusBarItem>
         </StatusBar>
-        <!-- Or a richer log display:
-        <ListBox Grid.Row="2" ItemsSource="{Binding LogMessages}" MaxHeight="100" Margin="2"
-                 BorderBrush="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowBorderBrushKey}}"
-                 BorderThickness="0,1,0,0"
-                 ScrollViewer.VerticalScrollBarVisibility="Auto"/>
-        -->
     </Grid>
 </UserControl>

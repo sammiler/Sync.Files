@@ -229,7 +229,7 @@ namespace SyncFiles.Core.Services
                 if (!identical)
                 {
                     OnProgressReported($"Copying: {fileName} to {Path.GetDirectoryName(targetFile)}");
-                    File.Copy(sourceFile, targetFile, true); // Overwrite if exists
+                    await Task.Run(() => File.Copy(sourceFile, targetFile, true), cancellationToken);
                 }
                 else
                 {
