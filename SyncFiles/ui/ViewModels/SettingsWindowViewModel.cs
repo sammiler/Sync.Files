@@ -144,16 +144,65 @@ namespace SyncFiles.UI.ViewModels
         private void LoadSettings()
         {
             _originalSettings = _settingsManager.LoadSettings(_projectBasePath);
+            System.Diagnostics.Debug.WriteLine($"[LoadSettings] Loaded _originalSettings. Mappings count: {_originalSettings.Mappings?.Count ?? 0}");
+            if (_originalSettings.Mappings != null && _originalSettings.Mappings.Count > 0)
+            {
+                System.Diagnostics.Debug.WriteLine($"[LoadSettings] Original Mapping[0]: Source='{_originalSettings.Mappings[0].SourceUrl}', Target='{_originalSettings.Mappings[0].TargetPath}'");
+            }
 
-                Mappings.Clear();
-                WatchEntries.Clear();
-            foreach (var w in _originalSettings.WatchEntries) WatchEntries.Add(new WatchEntryViewModel(w.WatchedPath, w.OnEventScript));
+            Mappings.Clear(); // ObservableCollection for the UI
+            System.Diagnostics.Debug.WriteLine($"[LoadSettings] Mappings collection cleared. Count: {Mappings.Count}");
+
+            if (_originalSettings.Mappings != null) // Null check for safety
+            {
+                foreach (var m in _originalSettings.Mappings)
+                {
+                    if (m == null)
+                    {
+                        System.Diagnostics.Debug.WriteLine("[LoadSettings] Encountered a null mapping object in _originalSettings.Mappings. Skipping.");
+                        continue;
+                    }
+                    System.Diagnostics.Debug.WriteLine($"[LoadSettings] Processing original mapping: Source='{m.SourceUrl}', Target='{m.TargetPath}'");
+
+                    var newMappingVm = new MappingViewModel(m.SourceUrl, m.TargetPath);
+                    System.Diagnostics.Debug.WriteLine($"[LoadSettings] Created MappingViewModel: Source='{newMappingVm.SourceUrl}', Target='{newMappingVm.TargetPath}'");
+
+                    Mappings.Add(newMappingVm);
+                    System.Diagnostics.Debug.WriteLine($"[LoadSettings] Added to Mappings collection. New count: {Mappings.Count}");
+                    if (Mappings.Count > 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[LoadSettings] Mappings[0] after add: Source='{Mappings[0].SourceUrl}', Target='{Mappings[0].TargetPath}'");
+                    }
+                }
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine("[LoadSettings] _originalSettings.Mappings is null.");
+            }
+            System.Diagnostics.Debug.WriteLine($"[LoadSettings] Finished populating Mappings. Final count: {Mappings.Count}");
+
+
+            // Populate other settings
+            WatchEntries.Clear();
+            if (_originalSettings.WatchEntries != null)
+            {
+                foreach (var w in _originalSettings.WatchEntries)
+                    WatchEntries.Add(new WatchEntryViewModel(w.WatchedPath, w.OnEventScript));
+            }
+            System.Diagnostics.Debug.WriteLine($"[LoadSettings] Finished populating WatchEntries. Final count: {WatchEntries.Count}");
 
             PythonScriptPath = _originalSettings.PythonScriptPath;
+            System.Diagnostics.Debug.WriteLine($"[LoadSettings] PythonScriptPath set to: '{PythonScriptPath}'");
             PythonExecutablePath = _originalSettings.PythonExecutablePath;
+            System.Diagnostics.Debug.WriteLine($"[LoadSettings] PythonExecutablePath set to: '{PythonExecutablePath}'");
 
-                EnvironmentVariables.Clear();
-            foreach (var ev in _originalSettings.EnvironmentVariablesList) EnvironmentVariables.Add(new EnvironmentVariableViewModel(ev.Name, ev.Value));
+            EnvironmentVariables.Clear();
+            if (_originalSettings.EnvironmentVariablesList != null)
+            {
+                foreach (var ev in _originalSettings.EnvironmentVariablesList)
+                    EnvironmentVariables.Add(new EnvironmentVariableViewModel(ev.Name, ev.Value));
+            }
+            System.Diagnostics.Debug.WriteLine($"[LoadSettings] Finished populating EnvironmentVariables. Final count: {EnvironmentVariables.Count}");
         }
 
         private void ApplySettings()
@@ -203,7 +252,7 @@ namespace SyncFiles.UI.ViewModels
         private void BrowseForPythonScriptPath()
         {
             using (var dialog = new FolderBrowserDialog())
-            {
+                {
                 dialog.Description = "Select Python Scripts Directory";
                 dialog.SelectedPath = PythonScriptPath; // Start from current path if set
                 if (dialog.ShowDialog() == DialogResult.OK)

@@ -75,7 +75,7 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <TextBox Text="{Binding PythonScriptPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Grid.Column="0" Margin="0,0,5,0" VerticalContentAlignment="Center"/>
-                    <Button Content="Browse..." Command="{Binding BrowsePythonScriptPathCommand}" Grid.Column="1" Style="{StaticResource BrowseButtonStyle}"/>
+                    <Button Content="Browse..." Command="{Binding BrowsePythonScriptPathCommand}" Grid.Column="1" Style="{StaticResource BrowseButtonStyle}" Height="21" VerticalAlignment="Top"/>
                 </Grid>
 
                 <TextBlock Text="Python Executable Path:" Style="{StaticResource SettingLabelStyle}"/>

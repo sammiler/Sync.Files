@@ -121,11 +121,11 @@
                             <Image.Style>
                                 <Style TargetType="{x:Type Image}">
                                     <!-- 默认 Python 图标 -->
-                                    <Setter Property="Source" Value="/YourAssemblyName;component/Resources/PythonFileIcon.png"/>
+                                    <Setter Property="Source" Value="/SyncFiles;component/Resources/PythonFileIcon.png"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsMissing}" Value="True">
                                             <!-- 警告/丢失图标 -->
-                                            <Setter Property="Source" Value="/YourAssemblyName;component/Resources/WarningIcon.png"/>
+                                            <Setter Property="Source" Value="/SyncFiles;component/Resources/WarningIcon.png"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
