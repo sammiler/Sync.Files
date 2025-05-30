@@ -15,10 +15,12 @@ namespace SyncFiles // 确保这是你的 VSIX 项目的根命名空间
 {
     [PackageRegistration(UseManagedResourcesOnly = true, AllowsBackgroundLoading = true)]
     [InstalledProductRegistration("#110", "#112", "1.0", IconResourceID = 400)] // About box info
-    [ProvideMenuResource("SyncFilesCommands", 1)] // For command registration (VSCT file)
+    [ProvideMenuResource("Menus.ctmenu", 1)] // For command registration (VSCT file)
     [ProvideToolWindow(typeof(SyncFilesToolWindow), Style = VsDockStyle.Tabbed, Window = EnvDTE.Constants.vsWindowKindSolutionExplorer)] // 注册工具窗口
     [Guid(SyncFilesPackage.PackageGuidString)]
-    [ProvideAutoLoad(UIContextGuids80.SolutionExists, PackageAutoLoadFlags.BackgroundLoad)] // Fixed CS0117 by using "SolutionExists" instead of "SolutionExists_string"
+    //[ProvideAutoLoad(UIContextGuids80.SolutionExists, PackageAutoLoadFlags.BackgroundLoad)]
+    [ProvideAutoLoad(VSConstants.UICONTEXT.SolutionExistsAndFullyLoaded_string, PackageAutoLoadFlags.BackgroundLoad)]
+    [ProvideAutoLoad(VSConstants.UICONTEXT.NoSolution_string, PackageAutoLoadFlags.BackgroundLoad)]
     public sealed class SyncFilesPackage : AsyncPackage
     {
         public const string PackageGuidString = "f844e235-75b7-4cf6-8e53-4f5cb0866969"; // 你提供的 GUID
@@ -31,7 +33,6 @@ namespace SyncFiles // 确保这是你的 VSIX 项目的根命名空间
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
             System.Diagnostics.Debug.WriteLine("[INFO] [PACKAGE_INIT] Initializing SyncFilesPackage...");
-            await base.InitializeAsync(cancellationToken, progress);
             await this.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
             EnvDTE.DTE dte = await GetServiceAsync(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
             if (dte != null && dte.Solution != null && !string.IsNullOrEmpty(dte.Solution.FullName))
@@ -41,7 +42,6 @@ namespace SyncFiles // 确保这是你的 VSIX 项目的根命名空间
             else
             {
                 _projectBasePath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments); // 临时回退
-                MessageBox.Show("No solution loaded. SyncFiles functionality may be limited or use default paths.", "SyncFiles Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
             if (string.IsNullOrEmpty(_projectBasePath))
             {
@@ -62,6 +62,7 @@ namespace SyncFiles // 确保这是你的 VSIX 项目的根命名空间
                 _smartWorkflowService
             );
             await ShowToolWindowCommand.InitializeAsync(this); // 假设你有一个 ShowToolWindowCommand 类
+            await base.InitializeAsync(cancellationToken, progress);
             Console.WriteLine("[INFO] [PACKAGE_INIT] SyncFilesPackage initialized successfully.");
         }
         public async Task ShowToolWindowAsync()

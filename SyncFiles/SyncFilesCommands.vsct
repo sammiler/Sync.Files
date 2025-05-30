@@ -1,30 +1,103 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
-	<!-- 引入 VS 标准命令和菜单定义 -->
+
+	<Extern href="stdidcmd.h"/>
 	<Extern href="vsshlids.h"/>
 
-	<Symbols>
-		<!-- 包 GUID -->
-		<GuidSymbol name="guidSyncFilesPackage" value="{f844e235-75b7-4cf6-8e53-4f5cb0866969}" />
-		<!-- 命令集 GUID -->
-		<GuidSymbol name="guidSyncFilesCmdSet" value="{1d2c490a-9d9c-43ce-b45e-9e05a7e80d91}">
-			<IDSymbol name="cmdidShowSyncFilesToolWindow" value="0x0100" />
-		</GuidSymbol>
-		<!-- VS 内置图标 GUID -->
-		<GuidSymbol name="ImageCatalogGuid" value="{ae27a6b0-e345-4288-96df-5eaf394ee369}" />
-	</Symbols>
-
 	<Commands package="guidSyncFilesPackage">
-		<Buttons>
-			<Button guid="guidSyncFilesCmdSet" id="cmdidShowSyncFilesToolWindow" priority="0x0100" type="Button">
-				<!-- 临时放到“工具”菜单，排查菜单组问题 -->
-				<Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS"/>
-				<!-- 先不加 DynamicVisibility，确保按钮能显示 -->
+		<Menus>
+			<!-- 1. 定义你的自定义工具栏 "SyncFiles Toolbar" -->
+			<Menu guid="guidSyncFilesCmdSet" id="idSyncFilesToolbar" type="Toolbar" priority="0x0100">
+				<!-- 为工具栏本身设置一个优先级 -->
+				<CommandFlag>DefaultDocked</CommandFlag>
 				<Strings>
-					<ButtonText>Sync Files Tool Window</ButtonText>
-					<ToolTipText>Open the Sync Files tool window.</ToolTipText>
+					<ButtonText>SyncFiles Toolbar</ButtonText>
+					<!-- 显示在 "视图" -> "工具栏" 列表中的名字 -->
+					<CommandName>SyncFilesToolbar</CommandName>
+					<!-- 工具栏的内部名字/标题 -->
+				</Strings>
+			</Menu>
+
+			<!-- 2. (已注释掉) 原来的 "扩展" 菜单定义 -->
+			<!--
+            <Menu guid="guidSyncFilesCmdSet" id="SyncFilesSubMenu" priority="0x0100" type="Menu">
+                <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_EXTENSIONS"/>
+                <Strings>
+                    <ButtonText>SyncFiles</ButtonText>
+                    <CommandName>SyncFiles</CommandName>
+                </Strings>
+            </Menu>
+            -->
+		</Menus>
+
+		<Groups>
+			<!-- 3. 定义一个组，用于放置在你的自定义工具栏 "SyncFiles Toolbar" 上 -->
+			<Group guid="guidSyncFilesCmdSet" id="idSyncFilesGroupOnToolbar" priority="0x0100">
+				<Parent guid="guidSyncFilesCmdSet" id="idSyncFilesToolbar"/>
+				<!-- 父级是你新定义的工具栏 -->
+			</Group>
+
+			<!-- 4. (已注释掉) 原来的 "扩展" 菜单的组 -->
+			<!--
+            <Group guid="guidSyncFilesCmdSet" id="SyncFilesGroupInSubMenu" priority="0x0100">
+                <Parent guid="guidSyncFilesCmdSet" id="SyncFilesSubMenu"/>
+            </Group>
+            -->
+		</Groups>
+
+		<Buttons>
+			<!-- 5. 定义你的命令按钮，并将它放置到自定义工具栏上的组中 -->
+			<Button guid="guidSyncFilesCmdSet" id="cmdidShowSyncFilesToolWindow" priority="0x0100" type="Button">
+				<Parent guid="guidSyncFilesCmdSet" id="idSyncFilesGroupOnToolbar"/>
+				<!-- 父级是自定义工具栏上的组 -->
+				<!-- 为了在工具栏上好看，强烈建议添加一个图标 -->
+				<!-- 替换下面的注释为你真实的图标定义 -->
+				<!-- <Icon guid="guidSyncFilesImages" id="bmpToolWindowIcon" /> -->
+				<Strings>
+					<ButtonText>Show SyncFiles Window</ButtonText>
+					<!-- 按钮的文本 (如果没图标会显示，有图标通常不显示或只显示部分) -->
+					<ToolTipText>Opens the Sync Files tool window.</ToolTipText>
 				</Strings>
 			</Button>
 		</Buttons>
 	</Commands>
+
+	<!-- 6. (已移除) CommandPlacements 部分，因为我们现在不把按钮放到标准工具栏了 -->
+	<!-- 如果将来你还想把这个按钮放到其他地方 (比如上下文菜单)，可以再添加 CommandPlacements -->
+
+	<!-- 7. (占位符) 如果添加了图标，需要 Bitmaps 部分 -->
+	<!-- 示例，你需要取消注释并提供正确的路径和ID:
+    <Bitmaps>
+        <Bitmap guid="guidSyncFilesImages" href="Resources\SyncFilesIcon.png" usedList="bmpToolWindowIcon"/>
+    </Bitmaps>
+    -->
+
+	<Symbols>
+		<GuidSymbol name="guidSyncFilesPackage" value="{f844e235-75b7-4cf6-8e53-4f5cb0866969}" />
+
+		<GuidSymbol name="guidSyncFilesCmdSet" value="{1d2c490a-9d9c-43ce-b45e-9e05a7e80d91}">
+			<!-- 现有命令的 ID -->
+			<IDSymbol name="cmdidShowSyncFilesToolWindow" value="0x0100" />
+
+			<!-- 8. (已注释掉) 原来 "扩展" 菜单的 ID -->
+			<!--
+            <IDSymbol name="SyncFilesSubMenu" value="0x1020" />
+            <IDSymbol name="SyncFilesGroupInSubMenu" value="0x1021" />
+            -->
+
+			<!-- 9. 新的自定义工具栏及其组的 ID -->
+			<IDSymbol name="idSyncFilesToolbar" value="0x2000" />
+			<!-- 新的唯一 ID (例如 0x2000) -->
+			<IDSymbol name="idSyncFilesGroupOnToolbar" value="0x2001" />
+			<!-- 新的唯一 ID (例如 0x2001) -->
+		</GuidSymbol>
+
+		<!-- 10. (占位符) 如果添加了图标，需要为图标定义 GuidSymbol 和 IDSymbol -->
+		<!-- 示例，你需要取消注释并提供正确的GUID和ID:
+        <GuidSymbol name="guidSyncFilesImages" value="{YOUR-NEW-GUID-FOR-IMAGES-HERE-e-g-2d2c490a-9d9c-43ce-b45e-9e05a7e80d92}">
+            <IDSymbol name="bmpToolWindowIcon" value="1" />
+        </GuidSymbol>
+        -->
+	</Symbols>
+
 </CommandTable>

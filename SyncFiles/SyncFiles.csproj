@@ -74,7 +74,10 @@
     <Compile Include="ui\ViewModels\ViewModelBase.cs" />
   </ItemGroup>
   <ItemGroup>
-    <VSCTCompile Include="SyncFilesCommands.vsct" />
+    <VSCTCompile Include="SyncFilesCommands.vsct">
+    <ResourceName>Menus.ctmenu</ResourceName>
+    <SubType>Designer</SubType>
+    </VSCTCompile>
     <Content Include="py-script\delete.py" />
   </ItemGroup>
   <ItemGroup>
@@ -86,16 +89,15 @@
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
     <Reference Include="System" />
+    <Reference Include="System.IO.Compression.FileSystem" />
     <Reference Include="System.Xaml" />
     <Reference Include="System.Xml" />
     <Reference Include="WindowsBase" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.0.32112.339" ExcludeAssets="runtime" NoWarn="NU1604" />
     <PackageReference Include="Microsoft.VisualStudio.Shell.15.0">
       <Version>17.14.40264</Version>
     </PackageReference>
-    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="17.14.2094" NoWarn="NU1604" />
     <PackageReference Include="YamlDotNet">
       <Version>16.3.0</Version>
     </PackageReference>
