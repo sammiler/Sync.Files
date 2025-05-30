@@ -13,22 +13,31 @@ namespace SyncFiles.Core.Services
 {
     public class GitHubSyncService : IDisposable
     {
-        private readonly string _projectBasePath;
+        private  string _projectBasePath = null;
         private readonly HttpClient _httpClient;
         public event EventHandler SynchronizationCompleted;
         public event Action<string> ProgressReported;
+        private bool _init = false;
         public GitHubSyncService(string projectBasePath)
         {
-            if (string.IsNullOrEmpty(projectBasePath))
-            {
-                throw new ArgumentNullException(nameof(projectBasePath), "Project base path cannot be null or empty.");
-            }
-            _projectBasePath = Path.GetFullPath(projectBasePath); // Ensure it's an absolute path
             _httpClient = new HttpClient();
             _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("SyncFilesCsharpPlugin/1.0");
         }
+        public void UpdateProjectPath(string newProjectPath)
+        {
+            if (this._projectBasePath != newProjectPath && !string.IsNullOrEmpty(newProjectPath))
+            {
+                this._projectBasePath = Path.GetFullPath(newProjectPath);
+                _init = true;
+                Console.WriteLine($"[INFO] GitHubSyncService: Project path updated to '{this._projectBasePath ?? "null"}'.");
+                // Reset or reconfigure any internal state that depends on the project path
+                // For example, if you cache resolved $PROJECT_DIR$ paths, clear them.
+            }
+        }
         private string ResolvePath(string pathString)
         {
+            if (!_init)
+                return null;
             if (string.IsNullOrWhiteSpace(pathString))
             {
                 return string.Empty; // Or throw, depending on how critical an empty path is

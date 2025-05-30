@@ -1,4 +1,5 @@
 ﻿using Microsoft.VisualStudio.Shell;
+using Microsoft.VisualStudio.Shell.Interop;
 using System;
 using System.ComponentModel.Design;
 using Task = System.Threading.Tasks.Task;
@@ -24,15 +25,31 @@ namespace SyncFiles.Commands
             OleMenuCommandService commandService = await package.GetServiceAsync(typeof(IMenuCommandService)) as OleMenuCommandService;
             Instance = new ShowToolWindowCommand(package, commandService);
         }
-        private void Execute(object sender, EventArgs e)
+        // In ShowToolWindowCommand.cs
+        private void Execute(object sender, EventArgs e) // <<< NOW SYNCHRONOUS VOID
         {
             this.package.JoinableTaskFactory.RunAsync(async () =>
             {
-                if (this.package is SyncFilesPackage syncFilesPackage)
+                if (!(this.package is SyncFilesPackage sfp))
                 {
-                    await syncFilesPackage.ShowToolWindowAsync();
+                    Console.WriteLine("[ERROR] ShowToolWindowCommand: Package is not of type SyncFilesPackage.");
+                    // Call a helper like ShowErrorAsync if you create one
+                    VsShellUtilities.ShowMessageBox(this.package, "Internal Error: Package type mismatch.", "SyncFiles Error", OLEMSGICON.OLEMSGICON_CRITICAL, OLEMSGBUTTON.OLEMSGBUTTON_OK, OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
+                    return;
                 }
-            }).FileAndForget("SyncFiles/ShowToolWindow"); // FileAndForget 用于不需要等待完成的异步操作
+
+                try
+                {
+                    // The ShowToolWindowAsync method in SyncFilesPackage should handle UI thread switching internally
+                    await sfp.ShowToolWindowAsync();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ERROR] ShowToolWindowCommand.Execute: {ex}");
+                    VsShellUtilities.ShowMessageBox(this.package, $"Error showing tool window: {ex.Message}", "SyncFiles Error", OLEMSGICON.OLEMSGICON_CRITICAL, OLEMSGBUTTON.OLEMSGBUTTON_OK, OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
+                }
+
+            }).FileAndForget("SyncFiles/ShowToolWindow");
         }
     }
 }

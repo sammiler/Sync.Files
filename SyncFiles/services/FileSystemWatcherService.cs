@@ -1,4 +1,5 @@
-﻿using SyncFiles.Core.Models;       // For WatchEntry
+﻿using Microsoft.VisualStudio.Shell.Interop;
+using SyncFiles.Core.Models;       // For WatchEntry
 using SyncFiles.Core.Settings;     // For SyncFilesSettingsState
 using System;
 using System.Collections.Generic;
@@ -35,7 +36,7 @@ namespace SyncFiles.Core.Services
     public class FileSystemWatcherService : IDisposable
     {
         public event Action<string, string, string> WatchedFileChanged;
-        private readonly string _projectBasePath;
+        private  string _projectBasePath;
         private List<FileSystemWatcher> _activeWatchers = new List<FileSystemWatcher>();
         private List<WatchEntry> _currentWatchEntries = new List<WatchEntry>(); // Stores the resolved watch entries
         private bool _isDisposed = false;
@@ -47,6 +48,16 @@ namespace SyncFiles.Core.Services
                 Console.WriteLine($"[WARN] FileSystemWatcherService: Project base path '{projectBasePath}' is null, empty, or does not exist. Relative paths in WatchEntries may not resolve correctly.");
             }
             _projectBasePath = projectBasePath; // Store even if potentially invalid, path resolution logic will handle it
+        }
+        public void UpdateProjectPath(string newProjectPath)
+        {
+            if (this._projectBasePath != newProjectPath && !string.IsNullOrEmpty(newProjectPath))
+            {
+                this._projectBasePath = newProjectPath;
+                Console.WriteLine($"[INFO] GitHubSyncService: Project path updated to '{this._projectBasePath ?? "null"}'.");
+                // Reset or reconfigure any internal state that depends on the project path
+                // For example, if you cache resolved $PROJECT_DIR$ paths, clear them.
+            }
         }
         public void UpdateWatchers(SyncFilesSettingsState settings)
         {

@@ -1,4 +1,9 @@
-﻿using System;
+﻿using Microsoft.VisualStudio.Shell.Interop;
+using SyncFiles.Core.Config.SmartWorkflow;
+using SyncFiles.Core.Management;
+using SyncFiles.Core.Models;
+using SyncFiles.Core.Settings;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -6,19 +11,15 @@ using System.Net.Http;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using SyncFiles.Core.Config.SmartWorkflow;
-using SyncFiles.Core.Management;
-using SyncFiles.Core.Models;
-using SyncFiles.Core.Settings;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 namespace SyncFiles.Core.Services
 {
     public class SmartWorkflowService : IDisposable
     {
-        private readonly string _projectBasePath;
+        private  string _projectBasePath;
         private readonly SyncFilesSettingsManager _settingsManager;
-        private readonly GitHubSyncService _gitHubSyncService;
+        private  GitHubSyncService _gitHubSyncService;
         private HttpClient _httpClient;
         public event EventHandler WorkflowDownloadPhaseCompleted;
         private SmartPlatformConfig _pendingPlatformConfigFromYaml;
@@ -29,12 +30,24 @@ namespace SyncFiles.Core.Services
             SyncFilesSettingsManager settingsManager,
             GitHubSyncService gitHubSyncService)
         {
-            _projectBasePath = projectBasePath ?? throw new ArgumentNullException(nameof(projectBasePath));
             _settingsManager = settingsManager ?? throw new ArgumentNullException(nameof(settingsManager));
             _gitHubSyncService = gitHubSyncService ?? throw new ArgumentNullException(nameof(gitHubSyncService));
             _httpClient = new HttpClient();
             _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("SyncFilesCsharpPlugin-Workflow/1.0");
             _gitHubSyncService.SynchronizationCompleted += OnGitHubSyncServiceCompleted;
+        }
+
+        public void UpdateProjectPath(string newProjectPath,GitHubSyncService gitHubSyncService)
+        {
+            if (this._projectBasePath != newProjectPath && !string.IsNullOrEmpty(newProjectPath))
+            {
+                this._projectBasePath = newProjectPath;
+                _gitHubSyncService = gitHubSyncService ?? throw new ArgumentNullException(nameof(gitHubSyncService));
+
+                Console.WriteLine($"[INFO] GitHubSyncService: Project path updated to '{this._projectBasePath ?? "null"}'.");
+                // Reset or reconfigure any internal state that depends on the project path
+                // For example, if you cache resolved $PROJECT_DIR$ paths, clear them.
+            }
         }
         private string ResolveValue(string value)
         {

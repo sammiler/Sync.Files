@@ -82,9 +82,14 @@ namespace SyncFiles.UI.ViewModels
         {
             _projectBasePath = projectBasePath;
             _settingsManager = settingsManager;
+            // 如果服务实例可能在 InitializeAsync 被多次调用时发生变化，则需要先解绑旧事件
+            DetachEventHandlers(); // 先解绑，以防万一
             _gitHubSyncService = gitHubSyncService;
             _fileSystemWatcherService = fileSystemWatcherService;
             _smartWorkflowService = smartWorkflowService;
+            AttachEventHandlers(); // 绑定到（可能新的）服务实例
+
+            await LoadAndRefreshScriptsAsync(true); // forceScanDisk = true 用于初次加载
             if (_fileSystemWatcherService != null)
             {
                 _fileSystemWatcherService.WatchedFileChanged += OnWatchedFileChanged_Handler;
@@ -418,6 +423,107 @@ namespace SyncFiles.UI.ViewModels
         public void RequestAddScriptToGroup(ScriptGroupViewModel groupVM) { AppendLogMessage($"TODO: Add script to {groupVM.Name}"); }
         public void RequestRenameGroup(ScriptGroupViewModel groupVM) { AppendLogMessage($"TODO: Rename Group {groupVM.Name}"); }
         public void RequestDeleteGroup(ScriptGroupViewModel groupVM) { AppendLogMessage($"TODO: Delete Group {groupVM.Name}"); }
+
+        // 新增/修改: 当项目路径或服务实例改变时，用于更新 ViewModel 上下文的方法
+        public async Task UpdateProjectContextAsync(
+            string newProjectBasePath,
+            GitHubSyncService newGitHubSyncService,       // 包可能会传递新的服务实例
+            FileSystemWatcherService newFileSystemWatcherService,
+            SmartWorkflowService newSmartWorkflowService)
+        {
+            bool pathChanged = _projectBasePath != newProjectBasePath;
+            bool servicesChanged = _gitHubSyncService != newGitHubSyncService ||
+                                   _fileSystemWatcherService != newFileSystemWatcherService ||
+                                   _smartWorkflowService != newSmartWorkflowService;
+
+            // 如果路径和服务实例都没变，可能不需要做太多事情
+            if (!pathChanged && !servicesChanged && _settingsManager != null /*确保settingsManager已初始化*/)
+            {
+                // AppendLogMessage("项目上下文无显著变化。");
+                // 即使路径和服务没变，可能配置变了，也考虑刷新一下脚本和监听器
+                // 这一步可选，取决于你希望刷新的时机多么频繁
+                // await LoadAndRefreshScriptsAsync(false); // false 表示不强制扫描磁盘，仅根据配置刷新
+                // if (!string.IsNullOrEmpty(newProjectBasePath)) {
+                //     var currentSettings = _settingsManager.LoadSettings(newProjectBasePath);
+                //     UpdateFileWatchers(currentSettings);
+                // }
+                return;
+            }
+
+            AppendLogMessage($"正在更新 ViewModel 项目上下文。新路径: '{newProjectBasePath ?? "null"}'。服务实例是否重新分配: {servicesChanged}");
+
+            _projectBasePath = newProjectBasePath; // 更新内部的项目路径
+
+            // 如果服务实例本身发生了变化 (例如，被 Package 重新创建了)
+            if (servicesChanged)
+            {
+                DetachEventHandlers(); // 从旧的服务实例解绑事件
+
+                _gitHubSyncService = newGitHubSyncService;
+                _fileSystemWatcherService = newFileSystemWatcherService;
+                _smartWorkflowService = newSmartWorkflowService;
+
+                AttachEventHandlers(); // 绑定到新的服务实例
+            }
+
+            // 如果路径改变了，或者有其他强制刷新逻辑，则重新加载脚本和监听器
+            // LoadAndRefreshScriptsAsync 必须能健壮地处理 _projectBasePath 为 null 的情况
+            await LoadAndRefreshScriptsAsync(true); // forceScanDisk = true 以反映新路径或空状态
+
+            // 根据新路径和当前设置更新文件监听器
+            if (_settingsManager != null && !string.IsNullOrEmpty(_projectBasePath))
+            {
+                var currentSettings = _settingsManager.LoadSettings(_projectBasePath);
+                UpdateFileWatchers(currentSettings);
+            }
+            else if (_fileSystemWatcherService != null) // 如果路径现在为 null，确保监听器被清除
+            {
+                _fileSystemWatcherService.UpdateWatchers(new SyncFilesSettingsState());
+            }
+            AppendLogMessage("ViewModel 项目上下文更新完毕。");
+        }
+
+        // 用于添加和移除服务事件处理的辅助方法
+        private void AttachEventHandlers()
+        {
+            if (_fileSystemWatcherService != null)
+            {
+                _fileSystemWatcherService.WatchedFileChanged += OnWatchedFileChanged_Handler;
+            }
+            if (_gitHubSyncService != null)
+            {
+                _gitHubSyncService.SynchronizationCompleted += GitHubSyncService_RegularSyncCompleted_Handler;
+                _gitHubSyncService.ProgressReported += GitHubSyncService_ProgressReported_Handler; // 添加进度报告处理
+            }
+            if (_smartWorkflowService != null)
+            {
+                _smartWorkflowService.WorkflowDownloadPhaseCompleted += SmartWorkflowService_DownloadPhaseCompleted_Handler;
+            }
+        }
+
+        private void DetachEventHandlers()
+        {
+            if (_fileSystemWatcherService != null)
+            {
+                _fileSystemWatcherService.WatchedFileChanged -= OnWatchedFileChanged_Handler;
+            }
+            if (_gitHubSyncService != null)
+            {
+                _gitHubSyncService.SynchronizationCompleted -= GitHubSyncService_RegularSyncCompleted_Handler;
+                _gitHubSyncService.ProgressReported -= GitHubSyncService_ProgressReported_Handler;
+            }
+            if (_smartWorkflowService != null)
+            {
+                _smartWorkflowService.WorkflowDownloadPhaseCompleted -= SmartWorkflowService_DownloadPhaseCompleted_Handler;
+            }
+        }
+
+        // GitHub 同步进度报告的处理方法
+        private void GitHubSyncService_ProgressReported_Handler(string progressMessage)
+        {
+            AppendLogMessage($"[同步] {progressMessage}");
+        }
+
         public void Dispose()
         {
             if (_fileSystemWatcherService != null)
@@ -437,6 +543,8 @@ namespace SyncFiles.UI.ViewModels
             LogMessages.Clear();
             Console.WriteLine("SyncFilesToolWindowViewModel Disposed.");
         }
+
+       
     }
 }
 public static class ScriptEntryViewModelExtensions
