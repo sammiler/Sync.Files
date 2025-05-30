@@ -13,7 +13,7 @@
 				<Strings>
 					<ButtonText>SyncFiles Toolbar</ButtonText>
 					<!-- 显示在 "视图" -> "工具栏" 列表中的名字 -->
-					<CommandName>SyncFilesToolbar</CommandName>
+					<CommandName>SyncFiles</CommandName>
 					<!-- 工具栏的内部名字/标题 -->
 				</Strings>
 			</Menu>
@@ -54,9 +54,18 @@
 				<!-- 替换下面的注释为你真实的图标定义 -->
 				<!-- <Icon guid="guidSyncFilesImages" id="bmpToolWindowIcon" /> -->
 				<Strings>
-					<ButtonText>Show SyncFiles Window</ButtonText>
+					<ButtonText>SyncFiles</ButtonText>
 					<!-- 按钮的文本 (如果没图标会显示，有图标通常不显示或只显示部分) -->
 					<ToolTipText>Opens the Sync Files tool window.</ToolTipText>
+				</Strings>
+			</Button>
+			<!-- NEW: Button to open the Settings Window - in the submenu -->
+			<Button guid="guidSyncFilesCmdSet" id="cmdidShowSettingsWindow" priority="0x0200" type="Button">
+				<Parent guid="guidSyncFilesCmdSet" id="idSyncFilesGroupOnToolbar"/>
+				<!-- <Icon guid="guidSyncFilesImages" id="bmpSettingsIcon" /> -->
+				<Strings>
+					<ButtonText>Settings...</ButtonText>
+					<ToolTipText>Configure SyncFiles settings.</ToolTipText>
 				</Strings>
 			</Button>
 		</Buttons>
@@ -76,28 +85,26 @@
 		<GuidSymbol name="guidSyncFilesPackage" value="{f844e235-75b7-4cf6-8e53-4f5cb0866969}" />
 
 		<GuidSymbol name="guidSyncFilesCmdSet" value="{1d2c490a-9d9c-43ce-b45e-9e05a7e80d91}">
-			<!-- 现有命令的 ID -->
+			<!-- 命令 ID -->
 			<IDSymbol name="cmdidShowSyncFilesToolWindow" value="0x0100" />
+			<IDSymbol name="cmdidShowSettingsWindow" value="0x0101" />
+			<!-- ** THIS IS THE MISSING LINE ** -->
 
-			<!-- 8. (已注释掉) 原来 "扩展" 菜单的 ID -->
-			<!--
-            <IDSymbol name="SyncFilesSubMenu" value="0x1020" />
-            <IDSymbol name="SyncFilesGroupInSubMenu" value="0x1021" />
-            -->
-
-			<!-- 9. 新的自定义工具栏及其组的 ID -->
+			<!-- 菜单和组的 ID -->
 			<IDSymbol name="idSyncFilesToolbar" value="0x2000" />
-			<!-- 新的唯一 ID (例如 0x2000) -->
 			<IDSymbol name="idSyncFilesGroupOnToolbar" value="0x2001" />
-			<!-- 新的唯一 ID (例如 0x2001) -->
+
+			<IDSymbol name="idSyncFilesSubMenu" value="0x1020" />
+			<IDSymbol name="idSyncFilesGroupInSubMenu" value="0x1021" />
 		</GuidSymbol>
 
-		<!-- 10. (占位符) 如果添加了图标，需要为图标定义 GuidSymbol 和 IDSymbol -->
-		<!-- 示例，你需要取消注释并提供正确的GUID和ID:
-        <GuidSymbol name="guidSyncFilesImages" value="{YOUR-NEW-GUID-FOR-IMAGES-HERE-e-g-2d2c490a-9d9c-43ce-b45e-9e05a7e80d92}">
-            <IDSymbol name="bmpToolWindowIcon" value="1" />
-        </GuidSymbol>
-        -->
+		<!-- (占位符) 如果添加了图标，需要为图标定义 GuidSymbol 和 IDSymbol -->
+		<!-- 示例:
+    <GuidSymbol name="guidSyncFilesImages" value="{YOUR-NEW-GUID-FOR-IMAGES-HERE}">
+        <IDSymbol name="bmpToolWindowIcon" value="1" />
+        <IDSymbol name="bmpSettingsIcon" value="2" />
+    </GuidSymbol>
+    -->
 	</Symbols>
 
 </CommandTable>

@@ -46,6 +46,7 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="commands\ShowSettingsWindowCommand.cs" />
     <Compile Include="commands\ShowToolWindowCommand.cs" />
     <Compile Include="config\SmartWorkflow\SmartPlatformConfig.cs" />
     <Compile Include="config\SmartWorkflow\SmartWatchEntry.cs" />
@@ -64,19 +65,23 @@
     <Compile Include="settings\SyncFilesSettingsState.cs" />
     <Compile Include="SyncFilesPackage.cs" />
     <Compile Include="ui\common\RelayCommand.cs" />
+    <Compile Include="ui\Configuration\SettingsWindow.xaml.cs">
+      <DependentUpon>SettingsWindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="ui\ToolWindows\SyncFilesToolWindow.cs" />
     <Compile Include="ui\ToolWindows\SyncFilesToolWindowControl.xaml.cs">
       <DependentUpon>SyncFilesToolWindowControl.xaml</DependentUpon>
     </Compile>
     <Compile Include="ui\ViewModels\ScriptEntryViewModel.cs" />
     <Compile Include="ui\ViewModels\ScriptGroupViewModel.cs" />
+    <Compile Include="ui\ViewModels\SettingsWindowViewModel.cs" />
     <Compile Include="ui\ViewModels\SyncFilesToolWindowViewModel.cs" />
     <Compile Include="ui\ViewModels\ViewModelBase.cs" />
   </ItemGroup>
   <ItemGroup>
     <VSCTCompile Include="SyncFilesCommands.vsct">
-    <ResourceName>Menus.ctmenu</ResourceName>
-    <SubType>Designer</SubType>
+      <ResourceName>Menus.ctmenu</ResourceName>
+      <SubType>Designer</SubType>
     </VSCTCompile>
     <Content Include="py-script\delete.py" />
   </ItemGroup>
@@ -103,6 +108,10 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <Page Include="ui\Configuration\SettingsWindow.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
     <Page Include="ui\ToolWindows\SyncFilesToolWindowControl.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>

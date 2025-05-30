@@ -62,6 +62,7 @@ namespace SyncFiles // 确保这是你的 VSIX 项目的根命名空间
                 _smartWorkflowService
             );
             await ShowToolWindowCommand.InitializeAsync(this); // 假设你有一个 ShowToolWindowCommand 类
+            await ShowSettingsWindowCommand.InitializeAsync(this, _settingsManager, _projectBasePath); // NEW
             await base.InitializeAsync(cancellationToken, progress);
             Console.WriteLine("[INFO] [PACKAGE_INIT] SyncFilesPackage initialized successfully.");
         }

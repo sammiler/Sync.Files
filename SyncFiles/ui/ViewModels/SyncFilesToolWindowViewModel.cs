@@ -43,6 +43,19 @@ namespace SyncFiles.UI.ViewModels
                 }
             }
         }
+        // In SyncFilesToolWindowViewModel.cs
+        // ... existing code ...
+
+        public void UpdateFileWatchers(SyncFilesSettingsState settings)
+        {
+            if (_fileSystemWatcherService != null && settings != null)
+            {
+                AppendLogMessage("Updating file watchers from new settings...");
+                _fileSystemWatcherService.UpdateWatchers(settings);
+                AppendLogMessage("File watchers updated.");
+            }
+        }
+        // ... existing code ...
         private string _statusMessage;
         public string StatusMessage
         {
