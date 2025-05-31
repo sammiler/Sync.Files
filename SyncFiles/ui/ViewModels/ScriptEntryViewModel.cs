@@ -8,18 +8,19 @@ using System.IO;
 using System.Linq;
 using System.Text; // For StringBuilder
 using System.Threading.Tasks;
-using System.Windows.Input; // For ICommand (稍后会添加命令实现)
+using System.Windows.Input; // For ICommand 
+
 namespace SyncFiles.UI.ViewModels
 {
     public class ScriptEntryViewModel : ViewModelBase
     {
-        public static readonly string PlaceHolderId = "__PLACEHOLDER_SCRIPT_ID__"; // 定义常量
+        public static readonly string PlaceHolderId = "__PLACEHOLDER_SCRIPT_ID__";
         private readonly ScriptEntry _model;
-        private readonly ScriptExecutor _scriptExecutor; // 稍后会注入或创建
-        private readonly string _pythonExecutablePath; // 从主配置获取
-        private readonly string _pythonScriptBasePath; // 从主配置获取
-        private readonly Dictionary<string, string> _environmentVariables; // 从主配置获取
-        private readonly string _projectBasePath; // 从主配置或服务获取
+        private readonly ScriptExecutor _scriptExecutor;
+        private readonly string _pythonExecutablePath;
+        private readonly string _pythonScriptBasePath;
+        private readonly Dictionary<string, string> _environmentVariables;
+        private readonly string _projectBasePath;
         private bool _isMissing;
 
         private string _normalScriptIconPath;
@@ -27,8 +28,8 @@ namespace SyncFiles.UI.ViewModels
 
         private string _warningScriptIconPath;
         public string WarningScriptIconPath { get => _warningScriptIconPath; set => SetProperty(ref _warningScriptIconPath, value); }
-        private readonly SyncFilesToolWindowViewModel _parentViewModel; // Store parent
-        public bool CanExecuteScript => !IsMissing; // Or any other logic
+        private readonly SyncFilesToolWindowViewModel _parentViewModel;
+        public bool CanExecuteScript => !IsMissing;
 
         public bool IsExecutionModeTerminal => ExecutionMode.Equals("terminal", StringComparison.OrdinalIgnoreCase);
         public bool IsExecutionModeDirectApi => ExecutionMode.Equals("directApi", StringComparison.OrdinalIgnoreCase);
@@ -39,10 +40,8 @@ namespace SyncFiles.UI.ViewModels
             {
                 if (SetProperty(ref _isMissing, value))
                 {
-                    OnPropertyChanged(nameof(DisplayNameWithStatus)); // 如果显示名包含状态
+                    OnPropertyChanged(nameof(DisplayNameWithStatus));
                     OnPropertyChanged(nameof(ToolTipText));
-                    // Icon change is now handled by parent VM setting NormalScriptIconPath/WarningScriptIconPath
-                    // and XAML DataTrigger switching based on IsMissing.
                 }
             }
         }
@@ -71,8 +70,8 @@ namespace SyncFiles.UI.ViewModels
                 {
                     _model.ExecutionMode = value;
                     OnPropertyChanged();
-                    OnPropertyChanged(nameof(IsExecutionModeTerminal)); // Notify this dependent property
-                    OnPropertyChanged(nameof(IsExecutionModeDirectApi)); // Notify this dependent property
+                    OnPropertyChanged(nameof(IsExecutionModeTerminal));
+                    OnPropertyChanged(nameof(IsExecutionModeDirectApi));
                 }
             }
         }
@@ -121,22 +120,31 @@ namespace SyncFiles.UI.ViewModels
         public ICommand RunDirectCommand { get; private set; }
         public ICommand OpenScriptFileCommand { get; private set; }
         public ICommand SetAliasCommand { get; private set; }
-        public ICommand SetExecutionModeCommand { get; private set; }
+        public ICommand SetExecutionModeCommand { get; private set; } // This seems unused in XAML context menu, but keep if needed
         public ICommand SetDescriptionCommand { get; private set; }
-        public ICommand MoveToGroupCommand { get; private set; }    // Needs interaction with parent/main VM
-        public ICommand RemoveFromGroupCommand { get; private set; } // Needs interaction with parent/main VM
+        public ICommand MoveToGroupCommand { get; private set; }
+        public ICommand RemoveFromGroupCommand { get; private set; }
 
         public ICommand SetExecutionModeToTerminalCommand { get; }
         public ICommand SetExecutionModeToDirectApiCommand { get; }
+
+        // **** 已存在的属性，确保它们在这里 ****
         public bool IsScriptEntry => true;
-        public bool IsScriptGroup => false;
+        public bool IsScriptGroup => false; // ScriptEntry is not a group
+
+        // **** 添加这些缺失的属性和命令的只读实现 ****
+        public ICommand RenameGroupCommand => null;
+        public ICommand DeleteGroupCommand => null;
+        public bool IsScriptGroupAndNotDefault => false; // A ScriptEntry is never a non-default group
+        // **** 添加结束 ****
+
         public ScriptEntryViewModel(
             ScriptEntry model,
             string pythonExecutablePath,
             string pythonScriptBasePath,
             Dictionary<string, string> environmentVariables,
             string projectBasePath,
-            SyncFilesToolWindowViewModel parentViewModel) // Pass parent for actions like move/remove
+            SyncFilesToolWindowViewModel parentViewModel)
         {
             _model = model ?? throw new ArgumentNullException(nameof(model));
             _pythonExecutablePath = pythonExecutablePath;
@@ -144,7 +152,10 @@ namespace SyncFiles.UI.ViewModels
             _environmentVariables = environmentVariables ?? new Dictionary<string, string>();
             _projectBasePath = projectBasePath;
             _parentViewModel = parentViewModel ?? throw new ArgumentNullException(nameof(parentViewModel));
-            IsMissing = _model.IsMissing; // Initialize from model's persisted state if any
+            IsMissing = _model.IsMissing;
+
+            // CanExecute lambdas now match Func<bool> if your RelayCommand supports it,
+            // otherwise they should be (obj) => !IsMissing;
             ExecuteCommand = new DelegateCommand(Execute, CanExecute);
             RunInTerminalCommand = new DelegateCommand(ExecuteInTerminal, CanExecute);
             RunDirectCommand = new DelegateCommand(ExecuteDirectly, CanExecute);
@@ -156,6 +167,8 @@ namespace SyncFiles.UI.ViewModels
             MoveToGroupCommand = new RelayCommand(RequestMoveToGroup, CanExecute);
             RemoveFromGroupCommand = new RelayCommand(RequestRemoveFromGroup, CanExecute);
         }
+
+        // DelegateCommand class (保持不变)
         public class DelegateCommand : ICommand
         {
             private readonly Action _execute;
@@ -170,27 +183,28 @@ namespace SyncFiles.UI.ViewModels
             public void Execute(object parameter) => _execute();
             public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
         }
+
         private bool CanExecute() => !IsMissing;
 
-        private void Execute() // This is the method bound to ExecuteCommand
+        private void Execute()
         {
-            if (!CanExecuteScript) // Assuming CanExecuteScript is your guard property
+            if (!CanExecuteScript)
             {
                 _parentViewModel?.SetScriptExecutionStatus($"Cannot execute: {DisplayName} (missing or other condition).");
                 return;
             }
 
-            string fullScriptPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(_pythonScriptBasePath, Path));
-            if (!File.Exists(fullScriptPath))
+            string fullScriptPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(_pythonScriptBasePath ?? string.Empty, Path ?? string.Empty));
+            if (string.IsNullOrEmpty(Path) || !File.Exists(fullScriptPath))
             {
-                IsMissing = true; // Update status
+                IsMissing = true;
                 _parentViewModel?.SetScriptExecutionStatus($"ERROR: Script file not found for {DisplayName}: {fullScriptPath}");
-                Console.WriteLine($"[ERROR] Script file not found: {fullScriptPath}");
+                System.Diagnostics.Debug.WriteLine($"[ERROR] Script file not found: {fullScriptPath}");
                 return;
             }
 
             var executor = new Core.Services.ScriptExecutor(_projectBasePath);
-            var arguments = new List<string>(); // Populate if your scripts take arguments
+            var arguments = new List<string>();
 
             if (ExecutionMode.Equals("terminal", StringComparison.OrdinalIgnoreCase))
             {
@@ -213,29 +227,22 @@ namespace SyncFiles.UI.ViewModels
                     _parentViewModel?.AppendScriptError(DisplayName, $"Terminal launch error: {ex.Message}");
                 }
             }
-            else // Direct API
+            else
             {
-                _parentViewModel?.ClearScriptOutput(); // Clear previous output
+                _parentViewModel?.ClearScriptOutput();
                 _parentViewModel?.SetScriptExecutionStatus($"Executing (direct): {DisplayName}...");
-                IsScriptOutputVisible = true; // Make sure output panel is visible
+                IsScriptOutputVisible = true;
 
-                // ExecuteAndCaptureOutputAsync returns a Task<ScriptExecutionResult>
-                // We use ContinueWith to handle completion/failure without blocking the Execute method
                 _ = executor.ExecuteAndCaptureOutputAsync(
                     _pythonExecutablePath,
                     fullScriptPath,
                     arguments,
                     _environmentVariables,
                     _projectBasePath,
-                    // onOutputDataReceived:
                     stdout => _parentViewModel?.AppendScriptOutput(DisplayName, stdout),
-                    // onErrorDataReceived:
                     stderr => _parentViewModel?.AppendScriptError(DisplayName, stderr)
                 ).ContinueWith(task => {
-                    // This continuation runs when the async operation completes (success, fault, or cancel)
-                    // It's important to dispatch UI updates back to the UI thread.
-
-                    if (task.Status == TaskStatus.RanToCompletion) // <--- USING TaskStatus.RanToCompletion
+                    if (task.Status == TaskStatus.RanToCompletion)
                     {
                         _parentViewModel?.HandleScriptExecutionCompletion(DisplayName, task.Result);
                     }
@@ -248,10 +255,10 @@ namespace SyncFiles.UI.ViewModels
                         _parentViewModel?.SetScriptExecutionStatus($"CANCELLED: {DisplayName}.");
                         _parentViewModel?.AppendScriptOutput(DisplayName, "Execution was cancelled.");
                     }
-                }, TaskScheduler.Default); // Using TaskScheduler.Default for the continuation, then dispatching inside HandleScriptExecutionCompletion
+                }, TaskScheduler.Default);
             }
         }
-        // Property to control output visibility from ScriptEntry (optional, could be global in parent)
+
         private bool _isScriptOutputVisible;
         public bool IsScriptOutputVisible
         {
@@ -260,23 +267,22 @@ namespace SyncFiles.UI.ViewModels
             {
                 if (SetProperty(ref _isScriptOutputVisible, value) && _parentViewModel != null)
                 {
-                    _parentViewModel.IsScriptOutputVisible = value; // Sync with parent's property
+                    _parentViewModel.IsScriptOutputVisible = value;
                 }
             }
         }
         private void SetExecutionMode(string mode)
         {
             if (!CanExecute()) return;
-            ExecutionMode = mode; // This should trigger OnPropertyChanged if setter is correct
-            _parentViewModel.RequestSaveSettings(); // Tell parent to save all settings
+            ExecutionMode = mode;
+            _parentViewModel.RequestSaveSettings();
         }
 
         private void RequestSetAlias()
         {
             if (!CanExecute()) return;
-            // Simplistic input - replace with a proper dialog window
             string newAlias = ShowInputDialog("Enter new alias:", Alias);
-            if (newAlias != null) // Not cancelled
+            if (newAlias != null)
             {
                 Alias = newAlias.Trim();
                 _parentViewModel.RequestSaveSettings();
@@ -286,10 +292,10 @@ namespace SyncFiles.UI.ViewModels
         private void RequestSetDescription()
         {
             if (!CanExecute()) return;
-            string newDescription = ShowInputDialog("Enter new description:", Description, true); // true for multiline
+            string newDescription = ShowInputDialog("Enter new description:", Description, true);
             if (newDescription != null)
             {
-                Description = newDescription; // Trim handled by property setter or here
+                Description = newDescription;
                 _parentViewModel.RequestSaveSettings();
             }
         }
@@ -308,10 +314,6 @@ namespace SyncFiles.UI.ViewModels
 
         private string ShowInputDialog(string prompt, string defaultValue, bool multiline = false)
         {
-            // This is a VERY basic example. You should create a proper WPF input dialog window.
-            // For now, let's imagine a placeholder or skip to direct ViewModel interaction for brevity.
-            // In a real app, you'd open a new Window.
-            // For demonstration, let's assume _parentViewModel has a method to show a dialog.
             return _parentViewModel.ShowInputDialog(prompt, defaultValue, "", multiline);
         }
         private void ExecuteInTerminal() { string tempMode = ExecutionMode; ExecutionMode = "terminal"; Execute(); ExecutionMode = tempMode; }
@@ -320,27 +322,28 @@ namespace SyncFiles.UI.ViewModels
         private async void OpenScript()
         {
             if (IsMissing || _parentViewModel == null) return;
-            string fullScriptPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(_pythonScriptBasePath, Path));
-            if (!File.Exists(fullScriptPath))
+            string fullScriptPath = string.Empty;
+            try
+            {
+                fullScriptPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(_pythonScriptBasePath ?? string.Empty, Path ?? string.Empty));
+            }
+            catch (ArgumentException ex) // Path or basePath might contain invalid characters
+            {
+                IsMissing = true; // Consider it missing if path is invalid
+                _parentViewModel.ShowErrorMessage("Error", $"Invalid script path: {(Path ?? "null")}. Details: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[ERROR] Invalid script path for opening: {Path}. Error: {ex.Message}");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(Path) || !File.Exists(fullScriptPath))
             {
                 IsMissing = true;
                 _parentViewModel.ShowErrorMessage("Error", $"Script file not found: {fullScriptPath}");
-                Console.WriteLine($"[ERROR] Script file not found for opening: {fullScriptPath}");
+                System.Diagnostics.Debug.WriteLine($"[ERROR] Script file not found for opening: {fullScriptPath}");
                 return;
             }
-            Console.WriteLine($"Request to open script in IDE: {fullScriptPath}");
-            // 只在VS中打开
+            System.Diagnostics.Debug.WriteLine($"Request to open script in IDE: {fullScriptPath}");
             await _parentViewModel.OpenFileInIdeAsync(fullScriptPath);
-
-            // 移除了 Process.Start(...)
-            // try
-            // {
-            //     Process.Start(new ProcessStartInfo(fullScriptPath) { UseShellExecute = true });
-            // }
-            // catch (Exception ex)
-            // {
-            //     Console.WriteLine($"[ERROR] Failed to open script file '{fullScriptPath}' with system default: {ex.Message}");
-            // }
         }
         public ScriptEntry GetModel() => _model;
     }

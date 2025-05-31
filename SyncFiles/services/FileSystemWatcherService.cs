@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Permissions; // For FileSystemWatcher permission demands (though often implicit)
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 namespace SyncFiles.Core.Services
 {
     public class FileSystemEventArgsWrapper
@@ -228,25 +229,80 @@ namespace SyncFiles.Core.Services
                 return Path.GetFullPath(Path.Combine(effectiveBasePath, pathString));
             }
         }
+
         private void StopAllWatchers()
         {
-            lock (_lock) // Ensure thread safety
+            List<FileSystemWatcher> watchersToStop = null; // To hold watchers outside the lock for dispose
+
+            lock (_lock)
             {
-                if (_activeWatchers != null)
+                if (_activeWatchers != null && _activeWatchers.Any())
                 {
-                    Console.WriteLine($"[INFO] FileSystemWatcherService: Stopping {_activeWatchers.Count} active watchers.");
-                    foreach (var watcher in _activeWatchers)
-                    {
-                        watcher.EnableRaisingEvents = false;
-                        watcher.Changed -= (s, e) => OnFileSystemEvent(new FileSystemEventArgsWrapper(e), null, null); // Dummy args, handler checks for disposed
-                        watcher.Created -= (s, e) => OnFileSystemEvent(new FileSystemEventArgsWrapper(e), null, null);
-                        watcher.Deleted -= (s, e) => OnFileSystemEvent(new FileSystemEventArgsWrapper(e), null, null);
-                        watcher.Renamed -= (s, e) => OnFileSystemEvent(new FileSystemEventArgsWrapper(e), null, null);
-                        watcher.Error -= OnWatcherError;
-                        watcher.Dispose();
-                    }
-                    _activeWatchers.Clear();
+                    System.Diagnostics.Debug.WriteLine($"[INFO] FileSystemWatcherService: Preparing to stop {_activeWatchers.Count} active watchers.");
+                    watchersToStop = new List<FileSystemWatcher>(_activeWatchers); // Create a copy to operate on
+                    _activeWatchers.Clear(); // Clear the original list immediately
                 }
+            }
+
+            if (watchersToStop != null && watchersToStop.Any())
+            {
+                System.Diagnostics.Debug.WriteLine($"[INFO] FileSystemWatcherService: Stopping {watchersToStop.Count} watchers (Dispose will be queued).");
+                foreach (var watcher in watchersToStop)
+                {
+                    if (watcher == null) continue;
+
+                    string watcherPathForLog = "N/A";
+                    try { watcherPathForLog = watcher.Path + Path.DirectorySeparatorChar + watcher.Filter; } catch { /* Might fail if watcher is broken */ }
+                    System.Diagnostics.Debug.WriteLine($"[FileSystemWatcherService] Stopping watcher for: {watcherPathForLog}");
+
+                    try
+                    {
+                        if (watcher.EnableRaisingEvents)
+                        {
+                            watcher.EnableRaisingEvents = false;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[ERROR] FileSystemWatcherService: Exception setting EnableRaisingEvents=false for watcher {watcherPathForLog}: {ex.Message}");
+                    }
+                    try
+                    {
+                        watcher.Error -= OnWatcherError;
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[ERROR] FileSystemWatcherService: Exception unsubscribing Error event for watcher {watcherPathForLog}: {ex.Message}");
+                    }
+
+
+                    // Queue Dispose to a background thread
+                    var capturedWatcher = watcher; // Capture for the lambda
+                    System.Diagnostics.Debug.WriteLine($"[FileSystemWatcherService] Queuing background Dispose for watcher: {watcherPathForLog}");
+
+                    _ = Task.Run(() => // Fire and forget dispose
+                    {
+                        try
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[FileSystemWatcherService] Background task executing Dispose for watcher: {watcherPathForLog}");
+                            capturedWatcher.Dispose();
+                            System.Diagnostics.Debug.WriteLine($"[FileSystemWatcherService] Background Dispose completed for watcher: {watcherPathForLog}");
+                        }
+                        catch (ObjectDisposedException odEx)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[WARN] FileSystemWatcherService: Background ObjectDisposedException for watcher {watcherPathForLog}: {odEx.Message}");
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[ERROR] FileSystemWatcherService: Background critical exception during Dispose for watcher {watcherPathForLog}: {ex.ToString()}");
+                        }
+                    });
+                }
+                System.Diagnostics.Debug.WriteLine($"[INFO] FileSystemWatcherService: Finished processing stop for {watchersToStop.Count} watchers.");
+            }
+            else
+            {
+                System.Diagnostics.Debug.WriteLine($"[INFO] FileSystemWatcherService: No active watchers to stop.");
             }
         }
         public void Dispose()

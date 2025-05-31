@@ -110,7 +110,8 @@ namespace SyncFiles.UI.ViewModels
         private readonly IAsyncServiceProvider _serviceProvider;
         private string _statusMessage;
         private FileSystemWatcher _pythonScriptParentDirWatcher;
-
+        private readonly object _pythonScriptDirWatcherLock = new object();
+        private readonly object _pythonScriptParentWatcherLock = new object();
         public string StatusMessage
         {
             get => _statusMessage;
@@ -296,6 +297,7 @@ namespace SyncFiles.UI.ViewModels
 
         private void InitializePythonScriptWatcher()
         {
+            // Stop existing watchers first (this now uses locks internally)
             StopPythonScriptWatcher();
 
             if (_settingsManager == null) return;
@@ -309,42 +311,50 @@ namespace SyncFiles.UI.ViewModels
 
             DirectoryInfo scriptDirInfo = new DirectoryInfo(scriptPath);
 
-            try
+            lock (_pythonScriptDirWatcherLock) // Lock before creating/assigning _pythonScriptDirWatcher
             {
-                _pythonScriptDirWatcher = new FileSystemWatcher(scriptPath)
+                try
                 {
-                    Filter = "*.py",
-                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.CreationTime,
-                    IncludeSubdirectories = false
-                };
-                _pythonScriptDirWatcher.Changed += OnPythonScriptDirectoryChanged;
-                _pythonScriptDirWatcher.Created += OnPythonScriptDirectoryChanged;
-                _pythonScriptDirWatcher.Deleted += OnPythonScriptDirectoryChanged;
-                _pythonScriptDirWatcher.Renamed += OnPythonScriptDirectoryChanged;
-                _pythonScriptDirWatcher.EnableRaisingEvents = true;
-            }
-            catch (Exception ex)
-            {
-                AppendLogMessage($"[ERROR] Failed to initialize watcher for Python script directory '{scriptPath}': {ex.Message}");
-                _pythonScriptDirWatcher = null;
+                    _pythonScriptDirWatcher = new FileSystemWatcher(scriptPath)
+                    {
+                        Filter = "*.py",
+                        NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.CreationTime,
+                        IncludeSubdirectories = false
+                    };
+                    _pythonScriptDirWatcher.Changed += OnPythonScriptDirectoryChanged;
+                    _pythonScriptDirWatcher.Created += OnPythonScriptDirectoryChanged;
+                    _pythonScriptDirWatcher.Deleted += OnPythonScriptDirectoryChanged;
+                    _pythonScriptDirWatcher.Renamed += OnPythonScriptDirectoryChanged;
+                    _pythonScriptDirWatcher.EnableRaisingEvents = true;
+                    System.Diagnostics.Debug.WriteLine($"[PYTHON_WATCHER] Dir watcher initialized for: {scriptPath}");
+                }
+                catch (Exception ex)
+                {
+                    AppendLogMessage($"[ERROR] Failed to initialize watcher for Python script directory '{scriptPath}': {ex.Message}");
+                    _pythonScriptDirWatcher = null; // Ensure it's null on failure
+                }
             }
 
             if (scriptDirInfo.Parent != null && scriptDirInfo.Parent.Exists)
             {
-                try
+                lock (_pythonScriptParentWatcherLock) // Lock before creating/assigning _pythonScriptParentDirWatcher
                 {
-                    _pythonScriptParentDirWatcher = new FileSystemWatcher(scriptDirInfo.Parent.FullName)
+                    try
                     {
-                        NotifyFilter = NotifyFilters.DirectoryName,
-                    };
-                    _pythonScriptParentDirWatcher.Deleted += OnPythonScriptParentDirectoryChanged;
-                    _pythonScriptParentDirWatcher.Renamed += OnPythonScriptParentDirectoryChanged;
-                    _pythonScriptParentDirWatcher.EnableRaisingEvents = true;
-                }
-                catch (Exception ex)
-                {
-                    AppendLogMessage($"[ERROR] Failed to initialize watcher for parent of Python script directory '{scriptDirInfo.Parent.FullName}': {ex.Message}");
-                    _pythonScriptParentDirWatcher = null;
+                        _pythonScriptParentDirWatcher = new FileSystemWatcher(scriptDirInfo.Parent.FullName)
+                        {
+                            NotifyFilter = NotifyFilters.DirectoryName,
+                        };
+                        _pythonScriptParentDirWatcher.Deleted += OnPythonScriptParentDirectoryChanged;
+                        _pythonScriptParentDirWatcher.Renamed += OnPythonScriptParentDirectoryChanged;
+                        _pythonScriptParentDirWatcher.EnableRaisingEvents = true;
+                        System.Diagnostics.Debug.WriteLine($"[PYTHON_WATCHER] Parent watcher initialized for: {scriptDirInfo.Parent.FullName}");
+                    }
+                    catch (Exception ex)
+                    {
+                        AppendLogMessage($"[ERROR] Failed to initialize watcher for parent of Python script directory '{scriptDirInfo.Parent.FullName}': {ex.Message}");
+                        _pythonScriptParentDirWatcher = null; // Ensure it's null on failure
+                    }
                 }
             }
         }
@@ -357,8 +367,21 @@ namespace SyncFiles.UI.ViewModels
                 CurrentScriptExecutionStatus = message;
             });
         }
+
         private async void OnPythonScriptParentDirectoryChanged(object sender, FileSystemEventArgs e)
         {
+            FileSystemWatcher currentParentWatcher = null;
+            lock (_pythonScriptParentWatcherLock)
+            {
+                currentParentWatcher = _pythonScriptParentDirWatcher;
+            }
+            // ... (similar check as above)
+            if (currentParentWatcher == null || sender != currentParentWatcher)
+            {
+                System.Diagnostics.Debug.WriteLine($"[PYTHON_WATCHER] OnPythonScriptParentDirectoryChanged invoked with unexpected sender or disposed/null watcher. Path: {e.FullPath}");
+                return;
+            }
+            // ... rest of the method
             if (_settingsManager == null) return;
             var settings = _settingsManager.LoadSettings(_projectBasePath);
             if (string.IsNullOrEmpty(settings.PythonScriptPath)) return;
@@ -453,27 +476,116 @@ namespace SyncFiles.UI.ViewModels
         }
         private void StopPythonScriptWatcher()
         {
-            if (_pythonScriptDirWatcher != null)
+            System.Diagnostics.Debug.WriteLine("[PYTHON_WATCHER] Attempting to stop Python script watchers...");
+
+            // Stop _pythonScriptDirWatcher
+            FileSystemWatcher dirWatcherToStop = null;
+            lock (_pythonScriptDirWatcherLock)
             {
-                _pythonScriptDirWatcher.EnableRaisingEvents = false;
-                _pythonScriptDirWatcher.Changed -= OnPythonScriptDirectoryChanged;
-                _pythonScriptDirWatcher.Created -= OnPythonScriptDirectoryChanged;
-                _pythonScriptDirWatcher.Deleted -= OnPythonScriptDirectoryChanged;
-                _pythonScriptDirWatcher.Renamed -= OnPythonScriptDirectoryChanged;
-                _pythonScriptDirWatcher.Dispose();
-                _pythonScriptDirWatcher = null;
+                if (_pythonScriptDirWatcher != null)
+                {
+                    dirWatcherToStop = _pythonScriptDirWatcher;
+                    _pythonScriptDirWatcher = null;
+                }
             }
-            if (_pythonScriptParentDirWatcher != null)
+
+            if (dirWatcherToStop != null)
             {
-                _pythonScriptParentDirWatcher.EnableRaisingEvents = false;
-                _pythonScriptParentDirWatcher.Deleted -= OnPythonScriptParentDirectoryChanged;
-                _pythonScriptParentDirWatcher.Renamed -= OnPythonScriptParentDirectoryChanged;
-                _pythonScriptParentDirWatcher.Dispose();
-                _pythonScriptParentDirWatcher = null;
+                string dirPathForLog = "N/A";
+                try { dirPathForLog = dirWatcherToStop.Path; } catch { }
+                System.Diagnostics.Debug.WriteLine($"[PYTHON_WATCHER] Stopping directory watcher for: {dirPathForLog}");
+                try
+                {
+                    if (dirWatcherToStop.EnableRaisingEvents)
+                    {
+                        dirWatcherToStop.EnableRaisingEvents = false;
+                    }
+                }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ERROR] [PYTHON_WATCHER] Exception EnableRaisingEvents=false for dir: {ex.Message} @ {dirPathForLog}"); }
+                try
+                {
+                    dirWatcherToStop.Changed -= OnPythonScriptDirectoryChanged;
+                    dirWatcherToStop.Created -= OnPythonScriptDirectoryChanged;
+                    dirWatcherToStop.Deleted -= OnPythonScriptDirectoryChanged;
+                    dirWatcherToStop.Renamed -= OnPythonScriptDirectoryChanged;
+                }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ERROR] [PYTHON_WATCHER] Exception unsubscribing for dir: {ex.Message} @ {dirPathForLog}"); }
+
+                var capturedDirWatcher = dirWatcherToStop;
+                System.Diagnostics.Debug.WriteLine($"[PYTHON_WATCHER] Queuing background Dispose for directory watcher: {dirPathForLog}");
+                _ = Task.Run(() =>
+                {
+                    try
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[PYTHON_WATCHER] BG Dispose for dir: {dirPathForLog}");
+                        capturedDirWatcher.Dispose();
+                        System.Diagnostics.Debug.WriteLine($"[PYTHON_WATCHER] BG Dispose completed for dir: {dirPathForLog}");
+                    }
+                    catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ERROR] [PYTHON_WATCHER] BG Dispose ex for dir: {ex.ToString()} @ {dirPathForLog}"); }
+                });
             }
+
+            // Stop _pythonScriptParentDirWatcher
+            FileSystemWatcher parentWatcherToStop = null;
+            lock (_pythonScriptParentWatcherLock)
+            {
+                if (_pythonScriptParentDirWatcher != null)
+                {
+                    parentWatcherToStop = _pythonScriptParentDirWatcher;
+                    _pythonScriptParentDirWatcher = null;
+                }
+            }
+            if (parentWatcherToStop != null)
+            {
+                string parentPathForLog = "N/A";
+                try { parentPathForLog = parentWatcherToStop.Path; } catch { }
+                System.Diagnostics.Debug.WriteLine($"[PYTHON_WATCHER] Stopping parent directory watcher for: {parentPathForLog}");
+                try
+                {
+                    if (parentWatcherToStop.EnableRaisingEvents)
+                    {
+                        parentWatcherToStop.EnableRaisingEvents = false;
+                    }
+                }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ERROR] [PYTHON_WATCHER] Exception EnableRaisingEvents=false for parent: {ex.Message} @ {parentPathForLog}"); }
+                try
+                {
+                    parentWatcherToStop.Deleted -= OnPythonScriptParentDirectoryChanged;
+                    parentWatcherToStop.Renamed -= OnPythonScriptParentDirectoryChanged;
+                }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ERROR] [PYTHON_WATCHER] Exception unsubscribing for parent: {ex.Message} @ {parentPathForLog}"); }
+
+                var capturedParentWatcher = parentWatcherToStop;
+                System.Diagnostics.Debug.WriteLine($"[PYTHON_WATCHER] Queuing background Dispose for parent watcher: {parentPathForLog}");
+                _ = Task.Run(() =>
+                {
+                    try
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[PYTHON_WATCHER] BG Dispose for parent: {parentPathForLog}");
+                        capturedParentWatcher.Dispose();
+                        System.Diagnostics.Debug.WriteLine($"[PYTHON_WATCHER] BG Dispose completed for parent: {parentPathForLog}");
+                    }
+                    catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ERROR] [PYTHON_WATCHER] BG Dispose ex for parent: {ex.ToString()} @ {parentPathForLog}"); }
+                });
+            }
+            System.Diagnostics.Debug.WriteLine("[PYTHON_WATCHER] StopPythonScriptWatcher method finished.");
         }
+
+
         private async void OnPythonScriptDirectoryChanged(object sender, FileSystemEventArgs e)
         {
+            FileSystemWatcher currentWatcher = null;
+            lock (_pythonScriptDirWatcherLock)
+            {
+                currentWatcher = _pythonScriptDirWatcher; // Get reference under lock
+            }
+
+            if (currentWatcher == null || sender != currentWatcher)
+            {
+                System.Diagnostics.Debug.WriteLine($"[PYTHON_WATCHER] OnPythonScriptDirectoryChanged invoked with unexpected sender or disposed/null watcher. Path: {e.FullPath}");
+                return;
+            }
+            // ... rest of the method (AppendLogMessage, InvokeAsync, etc.)
             AppendLogMessage($"Python script directory change detected: {e.ChangeType} on {e.Name}. Refreshing scripts...");
             if (Application.Current?.Dispatcher != null)
             {

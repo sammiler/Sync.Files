@@ -119,91 +119,54 @@ namespace SyncFiles
             }
         }
 
+        // In SyncFilesPackage.cs
 
-        private void InitializeConfigWatcher()
-        {
-            this.JoinableTaskFactory.RunAsync(async () =>
-            {
-                await this.JoinableTaskFactory.SwitchToMainThreadAsync(DisposalToken);
-                string currentProjectBasePath = await GetProjectBasePathAsync();
-
-                lock (_configWatcherLock)
-                {
-                    StopConfigWatcherInternal();
-                    if (!string.IsNullOrEmpty(currentProjectBasePath))
-                    {
-                        string vsFolderPath = Path.Combine(currentProjectBasePath, ".vs");
-                        if (!Directory.Exists(vsFolderPath)) // Ensure .vs folder exists
-                        {
-                            try { Directory.CreateDirectory(vsFolderPath); }
-                            catch (Exception ex)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"[ERROR] [CONFIG_WATCH] Failed to create .vs directory: {ex.Message}");
-                                return; // Cannot proceed without .vs folder
-                            }
-                        }
-                        string configFilePath = Path.Combine(vsFolderPath, "syncFilesConfig.xml");
-
-                        // FileSystemWatcher needs directory path, not file path for Path property
-                        string directoryToWatch = Path.GetDirectoryName(configFilePath);
-                        string fileToWatch = Path.GetFileName(configFilePath);
-
-                        if (Directory.Exists(directoryToWatch))
-                        {
-                            try
-                            {
-                                _configWatcher = new FileSystemWatcher
-                                {
-                                    Path = directoryToWatch,
-                                    Filter = fileToWatch,
-                                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.CreationTime,
-                                };
-                                _configWatcher.Changed += OnConfigFileChangedDebounced;
-                                _configWatcher.Created += OnConfigFileChangedDebounced;
-                                _configWatcher.Deleted += OnConfigFileChangedDebounced;
-                                _configWatcher.EnableRaisingEvents = true; // Enable after attaching handlers
-                                ToolWindowViewModel?.AppendLogMessage($"Config watcher initialized for: {configFilePath}");
-                                System.Diagnostics.Debug.WriteLine($"[CONFIG_WATCH] Config watcher initialized for: {configFilePath}");
-                            }
-                            catch (Exception ex)
-                            {
-                                System.Diagnostics.Debug.WriteLine($"[ERROR] [CONFIG_WATCH] Failed to initialize config watcher for {configFilePath}: {ex.Message}");
-                                ToolWindowViewModel?.AppendLogMessage($"[ERROR] Failed to initialize config watcher: {ex.Message}");
-                            }
-                        }
-                        else
-                        {
-                            System.Diagnostics.Debug.WriteLine($"[CONFIG_WATCH] Directory for config file not found: {directoryToWatch}. Watcher not started.");
-                        }
-                    }
-                    else
-                    {
-                        System.Diagnostics.Debug.WriteLine("[CONFIG_WATCH] Project base path is null or empty. Config watcher not started.");
-                    }
-                }
-            }).FileAndForget(nameof(InitializeConfigWatcher));
-        }
 
         private void StopConfigWatcherInternal()
         {
+            // This method assumes _configWatcherLock is ALREADY HELD by the caller
             if (_configWatcher != null)
             {
+                FileSystemWatcher watcherToStop = _configWatcher;
+                // _configWatcher is set to null by the caller (InitializeConfigWatcher or StopConfigWatcher)
+                // immediately after this call, still within the lock.
+                // Or, for absolute safety that this method itself doesn't rely on _configWatcher field after it's captured:
+                // _configWatcher = null; // if this method is the ONLY one setting the field to null.
+                // Given current InitializeConfigWatcher structure, it's better for Initialize to set it to null after this.
+
+                string pathForLog = "N/A";
+                try { pathForLog = watcherToStop.Path + Path.DirectorySeparatorChar + watcherToStop.Filter; } catch { }
+                System.Diagnostics.Debug.WriteLine($"[CONFIG_WATCH] Internal stop for: {pathForLog}");
+
                 try
                 {
-                    _configWatcher.EnableRaisingEvents = false;
-                    _configWatcher.Changed -= OnConfigFileChangedDebounced;
-                    _configWatcher.Created -= OnConfigFileChangedDebounced;
-                    _configWatcher.Deleted -= OnConfigFileChangedDebounced;
-                    _configWatcher.Dispose();
+                    if (watcherToStop.EnableRaisingEvents)
+                    {
+                        watcherToStop.EnableRaisingEvents = false;
+                    }
                 }
-                catch (Exception ex)
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ERROR] [CONFIG_WATCH] Internal Exception EnableRaisingEvents=false: {ex.ToString()} for {pathForLog}"); }
+
+                try
                 {
-                    System.Diagnostics.Debug.WriteLine($"[ERROR] [CONFIG_WATCH] Exception during StopConfigWatcherInternal: {ex.ToString()}");
+                    watcherToStop.Changed -= OnConfigFileChangedDebounced;
+                    watcherToStop.Created -= OnConfigFileChangedDebounced;
+                    watcherToStop.Deleted -= OnConfigFileChangedDebounced;
                 }
-                finally
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ERROR] [CONFIG_WATCH] Internal Exception unsubscribing events: {ex.ToString()} for {pathForLog}"); }
+
+                var capturedWatcher = watcherToStop;
+                System.Diagnostics.Debug.WriteLine($"[CONFIG_WATCH] Queuing background Dispose for: {pathForLog}");
+                _ = Task.Run(() =>
                 {
-                    _configWatcher = null;
-                }
+                    try
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[CONFIG_WATCH] BG Dispose for: {pathForLog}");
+                        capturedWatcher.Dispose();
+                        System.Diagnostics.Debug.WriteLine($"[CONFIG_WATCH] BG Dispose completed for: {pathForLog}");
+                    }
+                    catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ERROR] [CONFIG_WATCH] BG Dispose ex: {ex.ToString()} for {pathForLog}"); }
+                });
             }
         }
 
@@ -211,9 +174,13 @@ namespace SyncFiles
         {
             lock (_configWatcherLock)
             {
-                StopConfigWatcherInternal();
+                if (_configWatcher != null) // Check again inside lock
+                {
+                    StopConfigWatcherInternal(); // Call the one that does the work
+                    _configWatcher = null; // Ensure field is null after stopping attempt initiated
+                }
             }
-            System.Diagnostics.Debug.WriteLine("[CONFIG_WATCH] Config watcher stopped (or attempt to stop completed).");
+            System.Diagnostics.Debug.WriteLine("[CONFIG_WATCH] StopConfigWatcher method finished.");
         }
 
         private void OnConfigFileChangedDebounced(object sender, FileSystemEventArgs e)
@@ -240,7 +207,72 @@ namespace SyncFiles
             }).FileAndForget("DebouncedConfigChange");
         }
 
+        private void InitializeConfigWatcher()
+        {
+            this.JoinableTaskFactory.RunAsync(async () =>
+            {
+                await this.JoinableTaskFactory.SwitchToMainThreadAsync(DisposalToken);
+                string currentProjectBasePath = await GetProjectBasePathAsync();
 
+                lock (_configWatcherLock) // Lock before accessing/modifying _configWatcher
+                {
+                    StopConfigWatcherInternal(); // Stop existing one first
+                    _configWatcher = null;       // Explicitly nullify after stop, before new creation
+
+                    if (!string.IsNullOrEmpty(currentProjectBasePath))
+                    {
+                        // ... (rest of the initialization logic to create and assign to _configWatcher) ...
+                        // (Make sure this part is also within the lock if it assigns to _configWatcher)
+                        string vsFolderPath = Path.Combine(currentProjectBasePath, ".vs");
+                        if (!Directory.Exists(vsFolderPath))
+                        {
+                            try { Directory.CreateDirectory(vsFolderPath); }
+                            catch (Exception ex)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"[ERROR] [CONFIG_WATCH] Failed to create .vs directory: {ex.Message}");
+                                return;
+                            }
+                        }
+                        string configFilePath = Path.Combine(vsFolderPath, "syncFilesConfig.xml");
+                        string directoryToWatch = Path.GetDirectoryName(configFilePath);
+                        string fileToWatch = Path.GetFileName(configFilePath);
+
+                        if (Directory.Exists(directoryToWatch))
+                        {
+                            try
+                            {
+                                var newWatcher = new FileSystemWatcher // Create new instance
+                                {
+                                    Path = directoryToWatch,
+                                    Filter = fileToWatch,
+                                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.CreationTime,
+                                };
+                                newWatcher.Changed += OnConfigFileChangedDebounced;
+                                newWatcher.Created += OnConfigFileChangedDebounced;
+                                newWatcher.Deleted += OnConfigFileChangedDebounced;
+                                newWatcher.EnableRaisingEvents = true;
+                                _configWatcher = newWatcher; // Assign to field last, under lock
+                                ToolWindowViewModel?.AppendLogMessage($"Config watcher initialized for: {configFilePath}");
+                                System.Diagnostics.Debug.WriteLine($"[CONFIG_WATCH] Config watcher initialized for: {configFilePath}");
+                            }
+                            // ... (catch block)
+                            catch (Exception ex)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"[ERROR] [CONFIG_WATCH] Failed to initialize config watcher for {configFilePath}: {ex.Message}");
+                                ToolWindowViewModel?.AppendLogMessage($"[ERROR] Failed to initialize config watcher: {ex.Message}");
+                                _configWatcher = null; // Ensure null on failure
+                            }
+                        }
+                        // ...
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine("[CONFIG_WATCH] Project base path is null or empty. Config watcher not started.");
+                        _configWatcher = null; // Ensure null if not started
+                    }
+                }
+            }).FileAndForget(nameof(InitializeConfigWatcher));
+        }
         private void OnConfigFileChanged(object sender, FileSystemEventArgs e)
         {
             FileSystemWatcher currentConfigWatcher;
