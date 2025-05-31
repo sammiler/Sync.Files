@@ -7,47 +7,44 @@
              xmlns:viewModels="clr-namespace:SyncFiles.UI.ViewModels"
              xmlns:shell="clr-namespace:Microsoft.VisualStudio.PlatformUI;assembly=Microsoft.VisualStudio.Shell.15.0"
              mc:Ignorable="d"
-             d:DesignHeight="450" d:DesignWidth="350"
+             d:DesignHeight="600" d:DesignWidth="400" 
              d:DataContext="{d:DesignInstance Type=viewModels:SyncFilesToolWindowViewModel, IsDesignTimeCreatable=True}"
              Background="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
              Foreground="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowTextBrushKey}}">
 
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
-        <!-- We will define ContextMenus inline or via more specific styles if needed -->
     </UserControl.Resources>
-
-    <!-- DataContext is set in code-behind by SyncFilesPackage -->
 
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <!-- Toolbar -->
             <RowDefinition Height="*"/>
-            <!-- TreeView -->
             <RowDefinition Height="Auto"/>
-            <!-- Optional Status Bar -->
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- 1. Toolbar -->
         <ToolBar Grid.Row="0" Height="Auto" Padding="2"
                  Background="{DynamicResource {x:Static shell:EnvironmentColors.CommandBarGradientBeginBrushKey}}">
-            <Button Command="{Binding RefreshScriptsCommand}" ToolTip="Refresh Scripts, Workspace and Settings">
-                <TextBlock Text="♻️" FontSize="14"/>
+            <Button Command="{Binding RefreshScriptsCommand}" ToolTip="刷新脚本、工作区和设置" Padding="3" Margin="1" Background="Transparent">
+                <Image Source="{Binding RefreshIconPath}" Width="16" Height="16" Stretch="Uniform"/>
             </Button>
-            <Button Command="{Binding AddGroupCommand}" ToolTip="Add New Script Group">
-                <TextBlock Text="➕G" FontSize="14"/>
+            <Button Command="{Binding AddGroupCommand}" ToolTip="添加新的脚本组" Padding="3" Margin="1" Background="Transparent">
+                <Image Source="{Binding AddGroupIconPath}" Width="16" Height="16" Stretch="Uniform"/>
             </Button>
             <Separator/>
-            <Button Command="{Binding SyncGitHubFilesCommand}" ToolTip="Sync GitHub Files Now">
-                <TextBlock Text="🔄Git" FontSize="14"/>
+            <Button Command="{Binding SyncGitHubFilesCommand}" ToolTip="立即同步GitHub文件" Padding="3" Margin="1" Background="Transparent">
+                <Image Source="{Binding SyncGitIconPath}" Width="16" Height="16" Stretch="Uniform"/>
             </Button>
-            <!-- LoadSmartWorkflowCommand Button removed -->
+            <Button Command="{Binding ToggleScriptOutputVisibilityCommand}" ToolTip="切换脚本输出面板的显示/隐藏" Padding="3" Margin="1" Background="Transparent">
+                <Image Source="{Binding ToggleOutputIconPath}" Width="16" Height="16" Stretch="Uniform"/>
+            </Button>
         </ToolBar>
 
-        <!-- 2. TreeView for Scripts -->
         <TreeView Grid.Row="1"
                   ItemsSource="{Binding ScriptGroups}"
+                  Background="Transparent"
                   BorderThickness="0,1,0,0"
                   BorderBrush="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowBorderBrushKey}}"
                   ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -59,40 +56,34 @@
                     <EventSetter Event="MouseDoubleClick" Handler="TreeViewItem_MouseDoubleClick"/>
                     <Setter Property="ContextMenu">
                         <Setter.Value>
-                            <!-- This ContextMenu's DataContext will be the TreeViewItem's DataContext (the ViewModel) -->
                             <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                <!-- Script Entry Specific Items -->
-                                <MenuItem Header="Execute" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanExecuteScript}"
+                                <!-- 右键菜单不再强制设置前景和背景，以使用默认样式 -->
+                                <MenuItem Header="执行" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanExecuteScript}"
                                           Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="Open File" Command="{Binding OpenScriptFileCommand}" IsEnabled="{Binding CanExecuteScript}"
+                                <MenuItem Header="打开文件" Command="{Binding OpenScriptFileCommand}" IsEnabled="{Binding CanExecuteScript}"
                                           Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                                 <Separator Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="Set Execution Mode" IsEnabled="{Binding CanExecuteScript}"
+                                <MenuItem Header="设置执行模式" IsEnabled="{Binding CanExecuteScript}"
                                           Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                    <MenuItem Header="Run in Terminal" Command="{Binding SetExecutionModeToTerminalCommand}"
+                                    <MenuItem Header="在终端运行" Command="{Binding SetExecutionModeToTerminalCommand}"
                                               IsChecked="{Binding IsExecutionModeTerminal, Mode=OneWay}"/>
-                                    <MenuItem Header="Run and Capture Output" Command="{Binding SetExecutionModeToDirectApiCommand}"
+                                    <MenuItem Header="运行并捕获输出" Command="{Binding SetExecutionModeToDirectApiCommand}"
                                               IsChecked="{Binding IsExecutionModeDirectApi, Mode=OneWay}"/>
                                 </MenuItem>
                                 <Separator Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="Set Alias..." Command="{Binding SetAliasCommand}" IsEnabled="{Binding CanExecuteScript}"
+                                <MenuItem Header="设置别名..." Command="{Binding SetAliasCommand}" IsEnabled="{Binding CanExecuteScript}"
                                           Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="Set Description..." Command="{Binding SetDescriptionCommand}" IsEnabled="{Binding CanExecuteScript}"
+                                <MenuItem Header="设置描述..." Command="{Binding SetDescriptionCommand}" IsEnabled="{Binding CanExecuteScript}"
                                           Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                                 <Separator Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="Move to Group..." Command="{Binding MoveToGroupCommand}" IsEnabled="{Binding CanExecuteScript}"
+                                <MenuItem Header="移动到组..." Command="{Binding MoveToGroupCommand}" IsEnabled="{Binding CanExecuteScript}"
                                           Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="Remove from this Group" Command="{Binding RemoveFromGroupCommand}" IsEnabled="{Binding CanExecuteScript}"
+                                <MenuItem Header="从此组移除" Command="{Binding RemoveFromGroupCommand}" IsEnabled="{Binding CanExecuteScript}"
                                           Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-
-                                <!-- Script Group Specific Items -->
-                                <MenuItem Header="Rename Group" Command="{Binding RenameGroupCommand}"
+                                <MenuItem Header="重命名组" Command="{Binding RenameGroupCommand}"
                                           Visibility="{Binding IsScriptGroupAndNotDefault, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="Delete Group" Command="{Binding DeleteGroupCommand}"
+                                <MenuItem Header="删除组" Command="{Binding DeleteGroupCommand}"
                                           Visibility="{Binding IsScriptGroupAndNotDefault, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <!-- Add a separator if both types of items can appear and script entry items were visible -->
-                                <!-- This logic can get complex in a single ContextMenu. -->
-                                <!-- Consider separate ContextMenus if this becomes too messy. -->
                             </ContextMenu>
                         </Setter.Value>
                     </Setter>
@@ -100,27 +91,24 @@
             </TreeView.ItemContainerStyle>
 
             <TreeView.Resources>
-                <!-- HierarchicalDataTemplate for ScriptGroupViewModel -->
                 <HierarchicalDataTemplate DataType="{x:Type viewModels:ScriptGroupViewModel}"
                                           ItemsSource="{Binding Scripts}">
                     <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="📁" Margin="0,0,5,0" VerticalAlignment="Center"/>
-                        <TextBlock Text="{Binding Name}" ToolTip="{Binding Name}" VerticalAlignment="Center"/>
+                        <Image Source="{Binding FolderIconPath}" Width="16" Height="16" Margin="0,0,5,0" VerticalAlignment="Center" Stretch="Uniform"/>
+                        <TextBlock Text="{Binding Name}" ToolTip="{Binding Name}" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowTextBrushKey}}"/>
                     </StackPanel>
                 </HierarchicalDataTemplate>
 
-                <!-- DataTemplate for ScriptEntryViewModel -->
                 <DataTemplate DataType="{x:Type viewModels:ScriptEntryViewModel}">
                     <StackPanel Orientation="Horizontal" ToolTip="{Binding PathAndMissingToolTipText}">
                         <Image Width="16" Height="16" Margin="0,0,5,0" VerticalAlignment="Center">
                             <Image.Style>
                                 <Style TargetType="{x:Type Image}">
-                                    <Setter Property="Source" Value="/SyncFiles;component/Resources/PythonFileIcon.png"/>
-                                    <!-- ADJUST ASSEMBLY NAME -->
+                                    <Setter Property="Source" Value="{Binding NormalScriptIconPath}"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsMissing}" Value="True">
-                                            <Setter Property="Source" Value="/SyncFiles;component/Resources/WarningIcon.png"/>
-                                            <!-- ADJUST ASSEMBLY NAME -->
+                                            <Setter Property="Source" Value="{Binding WarningScriptIconPath}"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -129,6 +117,7 @@
                         <TextBlock Text="{Binding DisplayNameWithStatus}" VerticalAlignment="Center">
                             <TextBlock.Style>
                                 <Style TargetType="{x:Type TextBlock}">
+                                    <Setter Property="Foreground" Value="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowTextBrushKey}}"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsMissing}" Value="True">
                                             <Setter Property="Foreground" Value="Red"/>
@@ -142,8 +131,53 @@
             </TreeView.Resources>
         </TreeView>
 
-        <!-- 3. Optional Status Bar -->
-        <StatusBar Grid.Row="2" Background="{DynamicResource {x:Static shell:EnvironmentColors.StatusBarDefaultBrushKey}}">
+        <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                      Background="{DynamicResource {x:Static shell:EnvironmentColors.CommandBarBorderBrushKey}}"
+                      ShowsPreview="True"
+                      Visibility="{Binding IsScriptOutputVisible, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+
+        <Grid Grid.Row="3"
+              Visibility="{Binding IsScriptOutputVisible, Converter={StaticResource BooleanToVisibilityConverter}}"
+              MinHeight="100" MaxHeight="300">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <ToolBar Grid.Row="0" Padding="2" Background="{DynamicResource {x:Static shell:EnvironmentColors.CommandBarGradientBeginBrushKey}}">
+                <TextBlock Text="脚本输出" Margin="5,0" VerticalAlignment="Center" Foreground="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowTextBrushKey}}"/>
+                <Button Command="{Binding ClearScriptOutputCommand}" ToolTip="清除输出" Padding="3" Margin="1" Background="Transparent">
+                    <TextBlock Text="🗑️" FontSize="14" VerticalAlignment="Center"/>
+                </Button>
+            </ToolBar>
+
+            <ListBox Grid.Row="1" ItemsSource="{Binding ScriptOutputLog}"
+                     Background="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
+                     BorderBrush="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                     BorderThickness="0,1,0,0"
+                     HorizontalContentAlignment="Stretch"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto">
+                <ListBox.ItemTemplate>
+                    <DataTemplate DataType="{x:Type viewModels:ScriptExecutionOutputLine}">
+                        <TextBlock Text="{Binding DisplayLine}" TextWrapping="Wrap">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowTextBrushKey}}"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsError}" Value="True">
+                                            <Setter Property="Foreground" Value="Red"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Grid>
+
+        <StatusBar Grid.Row="4" Background="{DynamicResource {x:Static shell:EnvironmentColors.StatusBarDefaultBrushKey}}">
             <StatusBarItem>
                 <TextBlock Text="{Binding StatusMessage}"
                            Foreground="{DynamicResource {x:Static shell:EnvironmentColors.StatusBarTextBrushKey}}"

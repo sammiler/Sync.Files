@@ -1,5 +1,7 @@
 ﻿using Microsoft.VisualStudio.Shell;
 using SyncFiles.Core.Management;
+using Microsoft.VisualStudio.PlatformUI; // For VSColorTheme and EnvironmentColors
+using System.Windows; // For Application.Current.Dispatcher
 using SyncFiles.Core.Models;
 using SyncFiles.Core.Services;
 using SyncFiles.Core.Settings;
@@ -12,7 +14,7 @@ using System.IO;
 using System.Linq;
 using System.Threading; // For CancellationTokenSource, if used for workflow cancellation
 using System.Threading.Tasks;
-using System.Windows; // For Application.Current.Dispatcher
+// using System.Windows; // For Application.Current.Dispatcher // Already included
 using System.Windows.Controls;
 using System.Windows.Input;
 namespace SyncFiles.UI.ViewModels
@@ -75,12 +77,34 @@ namespace SyncFiles.UI.ViewModels
             {
                 if (SetProperty(ref _isBusy, value))
                 {
-                    ((RelayCommand)LoadSmartWorkflowCommand)?.RaiseCanExecuteChanged();
+                    ((RelayCommand)RefreshScriptsCommand)?.RaiseCanExecuteChanged(); // Ensure RelayCommand is used
+                    ((RelayCommand)AddGroupCommand)?.RaiseCanExecuteChanged();
                     ((RelayCommand)SyncGitHubFilesCommand)?.RaiseCanExecuteChanged();
+                    ((RelayCommand)LoadSmartWorkflowCommand)?.RaiseCanExecuteChanged();
                     ((RelayCommand)CancelWorkflowCommand)?.RaiseCanExecuteChanged();
                 }
             }
         }
+        public bool CurrentThemeIsDark => IsDarkTheme();
+
+        // Icon properties
+        private string _refreshIconPath;
+        public string RefreshIconPath { get => _refreshIconPath; private set => SetProperty(ref _refreshIconPath, value); }
+
+        private string _addGroupIconPath;
+        public string AddGroupIconPath { get => _addGroupIconPath; private set => SetProperty(ref _addGroupIconPath, value); }
+
+        private string _syncGitIconPath;
+        public string SyncGitIconPath { get => _syncGitIconPath; private set => SetProperty(ref _syncGitIconPath, value); }
+
+        private string _toggleOutputIconPath;
+        public string ToggleOutputIconPath { get => _toggleOutputIconPath; private set => SetProperty(ref _toggleOutputIconPath, value); }
+
+
+        private string _assemblyName;
+        private readonly object _logMessagesLock = new object(); // Lock for LogMessages
+
+
         // In SyncFilesToolWindowViewModel.cs
         // ... existing code ...
 
@@ -119,6 +143,9 @@ namespace SyncFiles.UI.ViewModels
 
             ClearScriptOutputCommand = new RelayCommand(ClearScriptOutput, () => ScriptOutputLog.Any());
             ToggleScriptOutputVisibilityCommand = new RelayCommand(() => IsScriptOutputVisible = !IsScriptOutputVisible);
+            _assemblyName = GetType().Assembly.GetName().Name;
+            UpdateIconsForTheme(); // Initial set
+            VSColorTheme.ThemeChanged += OnThemeChanged;
         }
         public async Task InitializeAsync(
             string projectBasePath,
@@ -153,6 +180,62 @@ namespace SyncFiles.UI.ViewModels
             await LoadAndRefreshScriptsAsync(true);
             InitializePythonScriptWatcher();
             AppendLogMessage("SyncFiles Tool Window initialized.");
+        }
+
+        private void OnThemeChanged(ThemeChangedEventArgs e)
+        {
+            Application.Current?.Dispatcher?.Invoke(() =>
+            {
+                UpdateIconsForTheme();
+                OnPropertyChanged(nameof(CurrentThemeIsDark)); // Notify if XAML binds to this
+            });
+        }
+
+        private bool IsDarkTheme()
+        {
+            // Ensure we are on the UI thread or can access UI properties safely
+            if (Application.Current != null && Application.Current.Dispatcher.CheckAccess())
+            {
+                var backgroundColor = VSColorTheme.GetThemedColor(EnvironmentColors.ToolWindowBackgroundColorKey);
+                // Formula for perceived brightness
+                return (backgroundColor.R * 0.299 + backgroundColor.G * 0.587 + backgroundColor.B * 0.114) < 128;
+            }
+            else if (Application.Current != null)
+            {
+                // If on a background thread, marshal to UI thread
+                return Application.Current.Dispatcher.Invoke(() =>
+                {
+                    var backgroundColor = VSColorTheme.GetThemedColor(EnvironmentColors.ToolWindowBackgroundColorKey);
+                    return (backgroundColor.R * 0.299 + backgroundColor.G * 0.587 + backgroundColor.B * 0.114) < 128;
+                });
+            }
+            // Fallback if Application.Current is null (e.g., design time or unit test)
+            return false;
+        }
+
+        private void UpdateIconsForTheme()
+        {
+            bool isDark = IsDarkTheme();
+
+            RefreshIconPath = $"/{_assemblyName};component/Resources/Refresh{(isDark ? "_dark" : "")}.png";
+            AddGroupIconPath = $"/{_assemblyName};component/Resources/AddGroup{(isDark ? "_dark" : "")}.png";
+            SyncGitIconPath = $"/{_assemblyName};component/Resources/SyncGit{(isDark ? "_dark" : "")}.png";
+            ToggleOutputIconPath = $"/{_assemblyName};component/Resources/ToggleOutput{(isDark ? "_dark" : "")}.png";
+
+
+            string pythonIcon = $"/{_assemblyName};component/Resources/PythonFileIcon{(isDark ? "_dark" : "")}.png";
+            string warningIcon = $"/{_assemblyName};component/Resources/WarningIcon{(isDark ? "_dark" : "")}.png";
+            string folderIcon = $"/{_assemblyName};component/Resources/Folder{(isDark ? "_dark" : "")}.png";
+
+            foreach (var groupVM in ScriptGroups)
+            {
+                groupVM.FolderIconPath = folderIcon;
+                foreach (var scriptVM in groupVM.Scripts)
+                {
+                    scriptVM.NormalScriptIconPath = pythonIcon;
+                    scriptVM.WarningScriptIconPath = warningIcon;
+                }
+            }
         }
 
         private void InitializePythonScriptWatcher()
@@ -532,20 +615,36 @@ namespace SyncFiles.UI.ViewModels
 
         private void AppendLogMessage(string message)
         {
+            const int maxLogEntries = 200;
+            string formattedMessage = $"[{DateTime.Now:HH:mm:ss}] {message}";
+
+            Action updateAction = () =>
+            {
+                lock (_logMessagesLock) // Synchronize access to LogMessages
+                {
+                    LogMessages.Insert(0, formattedMessage);
+                    if (LogMessages.Count > maxLogEntries)
+                    {
+                        // Check if collection has items before removing.
+                        // This check might be redundant if Insert always makes count > 0,
+                        // but it's safer with potential multi-threading scenarios affecting count before lock.
+                        if (LogMessages.Count > 0)
+                        {
+                            LogMessages.RemoveAt(LogMessages.Count - 1);
+                        }
+                    }
+                }
+                StatusMessage = message; // Update a simpler single status message too (already on UI thread if here)
+            };
+
             if (Application.Current?.Dispatcher != null && !Application.Current.Dispatcher.CheckAccess())
             {
-                Application.Current.Dispatcher.Invoke(() => LogMessages.Insert(0, $"[{DateTime.Now:HH:mm:ss}] {message}"));
+                Application.Current.Dispatcher.Invoke(updateAction);
             }
             else
             {
-                LogMessages.Insert(0, $"[{DateTime.Now:HH:mm:ss}] {message}");
+                updateAction(); // Already on UI thread or no dispatcher
             }
-            const int maxLogEntries = 200;
-            if (LogMessages.Count > maxLogEntries)
-            {
-                LogMessages.RemoveAt(LogMessages.Count - 1);
-            }
-            StatusMessage = message; // Update a simpler single status message too
         }
         private async void OnWatchedFileChanged_Handler(string scriptToExecute, string eventType, string affectedFile)
         {
@@ -642,14 +741,14 @@ namespace SyncFiles.UI.ViewModels
                 {
                     ShowMessage("Error", "Visual Studio DTE service not available to open file.");
                     // Fallback to Process.Start as a last resort
-                    Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true });
+                    // Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true }); // Removed as per request
                 }
             }
             catch (Exception ex)
             {
                 AppendLogMessage($"[ERROR] Failed to open script file '{filePath}' in IDE: {ex.Message}");
-                ShowMessage("Error Opening File", $"Could not open file in IDE: {ex.Message}\nAttempting to open with system default...");
-                try { Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true }); } catch { } // Fallback
+                ShowMessage("Error Opening File", $"Could not open file in IDE: {ex.Message}");
+                // try { Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true }); } catch { } // Fallback Removed
             }
         }
         public async Task LoadAndRefreshScriptsAsync(bool forceScanDisk)
@@ -725,6 +824,7 @@ namespace SyncFiles.UI.ViewModels
                         foreach (var groupModel in sortedGroupModels)
                         {
                             var groupVM = new ScriptGroupViewModel(groupModel, pythonExecutable, pythonScriptBasePath, settings.EnvVariables, _projectBasePath, this);
+                            // Icon paths for groupVM and its scriptVMs will be set by UpdateIconsForTheme call below
                             ScriptGroups.Add(groupVM);
                         }
                         AppendLogMessage("Scripts tree UI refreshed.");
@@ -739,6 +839,7 @@ namespace SyncFiles.UI.ViewModels
             finally
             {
                 IsBusy = false;
+                UpdateIconsForTheme(); // Ensure icons are set for newly loaded VMs
                 ((RelayCommand)RefreshScriptsCommand)?.RaiseCanExecuteChanged(); // Update command states
             }
         }
@@ -972,6 +1073,7 @@ namespace SyncFiles.UI.ViewModels
             {
                 _smartWorkflowService.WorkflowDownloadPhaseCompleted -= SmartWorkflowService_DownloadPhaseCompleted_Handler;
             }
+            VSColorTheme.ThemeChanged -= OnThemeChanged; // Unsubscribe
         }
 
         // GitHub 同步进度报告的处理方法
@@ -985,6 +1087,8 @@ namespace SyncFiles.UI.ViewModels
             StopPythonScriptWatcher();
             if (_fileSystemWatcherService != null)
             {
+                // Note: These events are detached in DetachEventHandlers, called by UpdateProjectContextAsync
+                // If Dispose can be called independently, ensure these are removed.
                 _fileSystemWatcherService.WatchedFileChanged -= OnWatchedFileChanged_Handler;
             }
             if (_gitHubSyncService != null)
@@ -996,12 +1100,13 @@ namespace SyncFiles.UI.ViewModels
                 _smartWorkflowService.WorkflowDownloadPhaseCompleted -= SmartWorkflowService_DownloadPhaseCompleted_Handler;
                 _smartWorkflowService.UnsubscribeGitHubSyncEvents(); // Crucial
             }
+            VSColorTheme.ThemeChanged -= OnThemeChanged;
             _workflowCts?.Dispose();
             LogMessages.Clear();
             Console.WriteLine("SyncFilesToolWindowViewModel Disposed.");
         }
 
-       
+
     }
 }
 public static class ScriptEntryViewModelExtensions

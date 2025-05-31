@@ -79,12 +79,25 @@
     <Compile Include="ui\ViewModels\ViewModelBase.cs" />
   </ItemGroup>
   <ItemGroup>
+    <Resource Include="Resources\ToggleOutput.png" />
+    <Resource Include="Resources\ToggleOutput_dark.png" />
+    <Resource Include="Resources\AddGroup.png" />
+    <Resource Include="Resources\AddGroup_dark.png" />
+    <Resource Include="Resources\Folder_dark.png" />
+    <Resource Include="Resources\Folder.png" />
+    <Resource Include="Resources\WarningIcon_dark.png" />
+    <Resource Include="Resources\PythonFileIcon_dark.png" />
+    <Resource Include="Resources\SyncGit_dark.png" />
+    <Resource Include="Resources\SyncGit.png" />
+    <Resource Include="Resources\Refresh_dark.png" />
+    <Resource Include="Resources\Refresh.png" />
     <Resource Include="Resources\PythonFileIcon.png" />
     <Resource Include="Resources\WarningIcon.png" />
     <VSCTCompile Include="SyncFilesCommands.vsct">
       <ResourceName>Menus.ctmenu</ResourceName>
       <SubType>Designer</SubType>
     </VSCTCompile>
+    <Content Include="py-script\codecopy.py" />
     <Content Include="py-script\delete.py" />
   </ItemGroup>
   <ItemGroup>
@@ -96,6 +109,7 @@
     <Reference Include="PresentationCore" />
     <Reference Include="PresentationFramework" />
     <Reference Include="System" />
+    <Reference Include="System.Drawing" />
     <Reference Include="System.IO.Compression.FileSystem" />
     <Reference Include="System.Xaml" />
     <Reference Include="System.Xml" />

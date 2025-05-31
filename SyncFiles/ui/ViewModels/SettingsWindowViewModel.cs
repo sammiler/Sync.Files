@@ -246,7 +246,6 @@ namespace SyncFiles.UI.ViewModels
                     System.Windows.MessageBox.Show($"Watcher Error: Script '{watchEntryVm.OnEventScript}' (resolved to '{resolvedScriptPath}') for watcher does not exist.", "Settings Validation", MessageBoxButton.OK, MessageBoxImage.Error);
                     return; // Stop saving
                 }
-                newSettings.WatchEntries.Add(new WatchEntry(resolvedWatchedPath, resolvedScriptPath));
             }
             _settingsManager.SaveSettings(newSettings, _projectBasePath);
             _originalSettings = newSettings; // Update original settings after saving

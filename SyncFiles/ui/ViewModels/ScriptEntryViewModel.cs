@@ -21,6 +21,12 @@ namespace SyncFiles.UI.ViewModels
         private readonly Dictionary<string, string> _environmentVariables; // 从主配置获取
         private readonly string _projectBasePath; // 从主配置或服务获取
         private bool _isMissing;
+
+        private string _normalScriptIconPath;
+        public string NormalScriptIconPath { get => _normalScriptIconPath; set => SetProperty(ref _normalScriptIconPath, value); }
+
+        private string _warningScriptIconPath;
+        public string WarningScriptIconPath { get => _warningScriptIconPath; set => SetProperty(ref _warningScriptIconPath, value); }
         private readonly SyncFilesToolWindowViewModel _parentViewModel; // Store parent
         public bool CanExecuteScript => !IsMissing; // Or any other logic
 
@@ -35,6 +41,8 @@ namespace SyncFiles.UI.ViewModels
                 {
                     OnPropertyChanged(nameof(DisplayNameWithStatus)); // 如果显示名包含状态
                     OnPropertyChanged(nameof(ToolTipText));
+                    // Icon change is now handled by parent VM setting NormalScriptIconPath/WarningScriptIconPath
+                    // and XAML DataTrigger switching based on IsMissing.
                 }
             }
         }
@@ -304,10 +312,11 @@ namespace SyncFiles.UI.ViewModels
             // For now, let's imagine a placeholder or skip to direct ViewModel interaction for brevity.
             // In a real app, you'd open a new Window.
             // For demonstration, let's assume _parentViewModel has a method to show a dialog.
-            return _parentViewModel.ShowInputDialog(prompt, defaultValue,"", multiline);
+            return _parentViewModel.ShowInputDialog(prompt, defaultValue, "", multiline);
         }
         private void ExecuteInTerminal() { string tempMode = ExecutionMode; ExecutionMode = "terminal"; Execute(); ExecutionMode = tempMode; }
         private void ExecuteDirectly() { string tempMode = ExecutionMode; ExecutionMode = "directApi"; Execute(); ExecutionMode = tempMode; }
+
         private async void OpenScript()
         {
             if (IsMissing || _parentViewModel == null) return;
@@ -315,19 +324,23 @@ namespace SyncFiles.UI.ViewModels
             if (!File.Exists(fullScriptPath))
             {
                 IsMissing = true;
+                _parentViewModel.ShowMessage("Error", $"Script file not found: {fullScriptPath}");
                 Console.WriteLine($"[ERROR] Script file not found for opening: {fullScriptPath}");
                 return;
             }
-            Console.WriteLine($"Request to open script: {fullScriptPath}");
-            try
-            {
-                Process.Start(new ProcessStartInfo(fullScriptPath) { UseShellExecute = true });
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[ERROR] Failed to open script file '{fullScriptPath}': {ex.Message}");
-            }
+            Console.WriteLine($"Request to open script in IDE: {fullScriptPath}");
+            // 只在VS中打开
             await _parentViewModel.OpenFileInIdeAsync(fullScriptPath);
+
+            // 移除了 Process.Start(...)
+            // try
+            // {
+            //     Process.Start(new ProcessStartInfo(fullScriptPath) { UseShellExecute = true });
+            // }
+            // catch (Exception ex)
+            // {
+            //     Console.WriteLine($"[ERROR] Failed to open script file '{fullScriptPath}' with system default: {ex.Message}");
+            // }
         }
         public ScriptEntry GetModel() => _model;
     }

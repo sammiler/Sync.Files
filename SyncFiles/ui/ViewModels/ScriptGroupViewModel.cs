@@ -28,6 +28,10 @@ namespace SyncFiles.UI.ViewModels
         public ICommand AddScriptToGroupCommand { get; private set; }
         public ICommand RenameGroupCommand { get; private set; }
         public ICommand DeleteGroupCommand { get; private set; }
+
+        private string _folderIconPath;
+        public string FolderIconPath { get => _folderIconPath; set => SetProperty(ref _folderIconPath, value); }
+
         public bool IsDefaultGroup => Id == ScriptGroup.DefaultGroupId;
         public bool IsScriptEntry => false;
         public bool IsScriptGroup => true;
@@ -48,7 +52,7 @@ namespace SyncFiles.UI.ViewModels
             );
             RenameGroupCommand = new RelayCommand(RequestRenameGroup, () => !IsDefaultGroup && parentViewModel != null);
             DeleteGroupCommand = new RelayCommand(RequestDeleteGroup, () => !IsDefaultGroup && parentViewModel != null);
-      
+
         }
         public void AddScript(ScriptEntryViewModel scriptVM)
         {
