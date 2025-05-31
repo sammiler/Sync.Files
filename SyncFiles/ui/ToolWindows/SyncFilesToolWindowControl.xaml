@@ -14,6 +14,7 @@
 
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
+        <!-- 全局 MenuItem 样式已移除，以避免潜在的资源解析问题 -->
     </UserControl.Resources>
 
     <Grid>
@@ -56,8 +57,9 @@
                     <EventSetter Event="MouseDoubleClick" Handler="TreeViewItem_MouseDoubleClick"/>
                     <Setter Property="ContextMenu">
                         <Setter.Value>
+                            <!-- ContextMenu本身使用VS默认主题样式 -->
                             <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                <!-- 右键菜单不再强制设置前景和背景，以使用默认样式 -->
+                                <!-- MenuItem 将使用其默认样式或从 ContextMenu 继承的样式 -->
                                 <MenuItem Header="执行" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanExecuteScript}"
                                           Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
                                 <MenuItem Header="打开文件" Command="{Binding OpenScriptFileCommand}" IsEnabled="{Binding CanExecuteScript}"

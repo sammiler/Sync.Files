@@ -13,19 +13,21 @@ namespace SyncFiles.Commands
 {
     internal sealed class ShowSettingsWindowCommand
     {
-        public const int CommandId = 0x0101; // CHOOSE A NEW UNIQUE ID
-        public static readonly Guid CommandSet = new Guid("1d2c490a-9d9c-43ce-b45e-9e05a7e80d91"); // Same command set or new one
+        public const int CommandId = 0x0101;
+        public static readonly Guid CommandSet = new Guid("1d2c490a-9d9c-43ce-b45e-9e05a7e80d91");
 
-        private readonly AsyncPackage package;
+        private readonly AsyncPackage package; // Keep AsyncPackage reference
         private readonly SyncFilesSettingsManager _settingsManager;
-        private readonly string _projectBasePath;
+        // private readonly string _projectBasePath; // No longer needed here, get dynamically
 
 
         private ShowSettingsWindowCommand(AsyncPackage package, OleMenuCommandService commandService, SyncFilesSettingsManager settingsManager)
         {
             this.package = package ?? throw new ArgumentNullException(nameof(package));
-            commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
-            _settingsManager = settingsManager;
+            // commandService is already checked by OleMenuCommandService constructor if it's null
+            // commandService = commandService ?? throw new ArgumentNullException(nameof(commandService)); 
+            _settingsManager = settingsManager ?? throw new ArgumentNullException(nameof(settingsManager));
+
 
             var menuCommandID = new CommandID(CommandSet, CommandId);
             var menuItem = new MenuCommand(this.Execute, menuCommandID);
@@ -41,64 +43,53 @@ namespace SyncFiles.Commands
             Instance = new ShowSettingsWindowCommand(package, commandService, settingsManager);
         }
 
-        // In ShowSettingsWindowCommand.cs
-        private void Execute(object sender, EventArgs e) // <<< NOW SYNCHRONOUS VOID
+        private void Execute(object sender, EventArgs e)
         {
-            // this.package is already an AsyncPackage, which has JoinableTaskFactory
-            this.package.JoinableTaskFactory.RunAsync(async () => // Asynchronous lambda
+            this.package.JoinableTaskFactory.RunAsync(async () =>
             {
-                // Perform a defensive cast here if needed, or assume this.package is always SyncFilesPackage
-                // For robustness, let's cast and check.
                 if (!(this.package is SyncFilesPackage sfp))
                 {
-                    Console.WriteLine("[ERROR] ShowSettingsWindowCommand: Package is not of type SyncFilesPackage.");
-                    // Optionally show a message to the user via VS services if this is critical
+                    System.Diagnostics.Debug.WriteLine("[ERROR] ShowSettingsWindowCommand: Package is not of type SyncFilesPackage.");
                     await ShowErrorAsync("Internal Error: Package type mismatch.");
                     return;
                 }
 
                 try
                 {
-                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(sfp.DisposalToken); // Ensure on main thread for UI
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(sfp.DisposalToken);
 
-                    await sfp.EnsureProjectSpecificServicesAsync();
-                    string currentProjectPath = await sfp.GetProjectBasePathAsync();
+                    await sfp.EnsureProjectSpecificServicesAsync(); // Ensure path and services are up-to-date
+                    string currentProjectPath = await sfp.GetProjectBasePathAsync(); // Get current path
 
                     if (string.IsNullOrEmpty(currentProjectPath))
                     {
-                        // Inform user (consider using VS Shell's dialog service for better integration)
-                        await ShowInfoAsync("A project/solution needs to be open for full functionality. Some features may be disabled.");
-                        // Decide if you still want to open the window. For now, we will.
+                        await ShowInfoAsync("A project/solution needs to be open for full settings functionality. Some path-dependent features may use defaults or be disabled.");
                     }
 
-                    // Assuming SettingsManager is accessible from sfp
-                    var settingsManagerInstance = sfp.SettingsManager;
-                    if (settingsManagerInstance == null)
+                    var settingsManagerInstance = sfp.SettingsManager; // Already have _settingsManager
+                    if (settingsManagerInstance == null) // Should use _settingsManager
                     {
                         await ShowErrorAsync("Internal Error: Settings manager not available.");
                         return;
                     }
 
-                    var viewModel = new SettingsWindowViewModel(settingsManagerInstance, currentProjectPath);
+                    // **** Pass the package instance (sfp, which is IAsyncServiceProvider) to the ViewModel ****
+                    var viewModel = new SettingsWindowViewModel(settingsManagerInstance, currentProjectPath, sfp);
                     var settingsWindow = new SettingsWindow(viewModel)
                     {
-                        Owner = System.Windows.Application.Current?.MainWindow?.IsVisible == true ? System.Windows.Application.Current.MainWindow : null
+                        Owner = Application.Current?.MainWindow?.IsVisible == true ? Application.Current.MainWindow : null
                     };
-                    settingsWindow.ShowDialog(); // This is a blocking call on the UI thread
+                    settingsWindow.ShowDialog();
                 }
                 catch (Exception ex)
                 {
-                    // Log the exception and show an error message to the user
-                    Console.WriteLine($"[ERROR] ShowSettingsWindowCommand.Execute: {ex}");
-                    // Use VS services to show error messages for better integration
-                    // For example, using IVsUIShell:
+                    System.Diagnostics.Debug.WriteLine($"[ERROR] ShowSettingsWindowCommand.Execute: {ex}");
                     await ShowErrorAsync($"Error opening settings: {ex.Message}");
                 }
 
-            }).FileAndForget("SyncFiles/ShowSettingsWindow"); // Provide a descriptive name for error reporting
+            }).FileAndForget("SyncFiles/ShowSettingsWindow");
         }
 
-        // Helper methods to show messages (could be part of a utility class or base command class)
         private async Task ShowInfoAsync(string message)
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();

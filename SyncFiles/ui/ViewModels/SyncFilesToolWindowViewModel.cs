@@ -1,22 +1,27 @@
 ﻿using Microsoft.VisualStudio.Shell;
 using SyncFiles.Core.Management;
-using Microsoft.VisualStudio.PlatformUI; // For VSColorTheme and EnvironmentColors
-using System.Windows; // For Application.Current.Dispatcher
+using Microsoft.VisualStudio.PlatformUI;
+using System.Windows;
 using SyncFiles.Core.Models;
 using SyncFiles.Core.Services;
 using SyncFiles.Core.Settings;
-using SyncFiles.UI.Common; // Assuming RelayCommand is here
+using SyncFiles.UI.Common;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Threading; // For CancellationTokenSource, if used for workflow cancellation
+using System.Threading;
 using System.Threading.Tasks;
-// using System.Windows; // For Application.Current.Dispatcher // Already included
 using System.Windows.Controls;
 using System.Windows.Input;
+using Microsoft.VisualStudio.Shell.Interop;
+using EnvDTE;
+using Microsoft.VisualStudio.Threading;
+using Microsoft.VisualStudio;
+using System.Windows.Media;
+
 namespace SyncFiles.UI.ViewModels
 {
     public class ScriptExecutionOutputLine
@@ -43,8 +48,8 @@ namespace SyncFiles.UI.ViewModels
         private SmartWorkflowService _smartWorkflowService;
         private string _projectBasePath;
         private FileSystemWatcher _pythonScriptDirWatcher;
-        public ICommand SaveSettingsCommand { get; } // For explicit save, or auto-save on change
-        private CancellationTokenSource _workflowCts; // For cancelling an ongoing workflow
+        public ICommand SaveSettingsCommand { get; }
+        private CancellationTokenSource _workflowCts;
         public ObservableCollection<ScriptGroupViewModel> ScriptGroups { get; }
         public ICommand RefreshScriptsCommand { get; }
         public ICommand AddGroupCommand { get; }
@@ -61,7 +66,7 @@ namespace SyncFiles.UI.ViewModels
         public ObservableCollection<ScriptExecutionOutputLine> ScriptOutputLog { get; }
 
         private bool _isScriptOutputVisible;
-        public bool IsScriptOutputVisible // To control visibility of the output panel
+        public bool IsScriptOutputVisible
         {
             get => _isScriptOutputVisible;
             set => SetProperty(ref _isScriptOutputVisible, value);
@@ -77,17 +82,16 @@ namespace SyncFiles.UI.ViewModels
             {
                 if (SetProperty(ref _isBusy, value))
                 {
-                    ((RelayCommand)RefreshScriptsCommand)?.RaiseCanExecuteChanged(); // Ensure RelayCommand is used
-                    ((RelayCommand)AddGroupCommand)?.RaiseCanExecuteChanged();
-                    ((RelayCommand)SyncGitHubFilesCommand)?.RaiseCanExecuteChanged();
-                    ((RelayCommand)LoadSmartWorkflowCommand)?.RaiseCanExecuteChanged();
-                    ((RelayCommand)CancelWorkflowCommand)?.RaiseCanExecuteChanged();
+                    (RefreshScriptsCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                    (AddGroupCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                    (SyncGitHubFilesCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                    (LoadSmartWorkflowCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                    (CancelWorkflowCommand as RelayCommand)?.RaiseCanExecuteChanged();
                 }
             }
         }
         public bool CurrentThemeIsDark => IsDarkTheme();
 
-        // Icon properties
         private string _refreshIconPath;
         public string RefreshIconPath { get => _refreshIconPath; private set => SetProperty(ref _refreshIconPath, value); }
 
@@ -102,49 +106,84 @@ namespace SyncFiles.UI.ViewModels
 
 
         private string _assemblyName;
-        private readonly object _logMessagesLock = new object(); // Lock for LogMessages
-
-
-        // In SyncFilesToolWindowViewModel.cs
-        // ... existing code ...
-
-        public void UpdateFileWatchers(SyncFilesSettingsState settings)
-        {
-            if (_fileSystemWatcherService != null && settings != null)
-            {
-                AppendLogMessage("Updating file watchers from new settings...");
-                _fileSystemWatcherService.UpdateWatchers(settings);
-                AppendLogMessage("File watchers updated.");
-            }
-        }
-        // ... existing code ...
+        private readonly object _logMessagesLock = new object();
+        private readonly IAsyncServiceProvider _serviceProvider;
         private string _statusMessage;
         private FileSystemWatcher _pythonScriptParentDirWatcher;
 
         public string StatusMessage
         {
             get => _statusMessage;
-            private set => SetProperty(ref _statusMessage, value); // Make setter private if only updated internally
+            private set => SetProperty(ref _statusMessage, value);
         }
-        public ObservableCollection<string> LogMessages { get; } // For a richer log display
+        public ObservableCollection<string> LogMessages { get; }
+
+
         public SyncFilesToolWindowViewModel()
         {
+            _serviceProvider = null;
+
             ScriptGroups = new ObservableCollection<ScriptGroupViewModel>();
             LogMessages = new ObservableCollection<string>();
-            RefreshScriptsCommand = new RelayCommand(async () => await LoadAndRefreshScriptsAsync(true), () => !IsBusy);
-            AddGroupCommand = new RelayCommand(AddNewGroup, () => !IsBusy); // Add CanExecute later if needed
-            SyncGitHubFilesCommand = new RelayCommand(async () => await SyncGitHubFilesAsync(false), () => !IsBusy); // false indicates not part of workflow
+            ScriptOutputLog = new ObservableCollection<ScriptExecutionOutputLine>();
+
+            RefreshScriptsCommand = new RelayCommand(() => { }, () => false);
+            AddGroupCommand = new RelayCommand(() => { }, () => false);
+            SyncGitHubFilesCommand = new RelayCommand(() => { }, () => false);
+            LoadSmartWorkflowCommand = new RelayCommand(() => { }, () => false);
+            CancelWorkflowCommand = new RelayCommand(() => { }, () => false);
+            SaveSettingsCommand = new RelayCommand(() => { }, () => false);
+            ClearScriptOutputCommand = new RelayCommand(() => { }, () => false);
+            ToggleScriptOutputVisibilityCommand = new RelayCommand(() => { });
+
+            CurrentScriptExecutionStatus = "Ready (Design Time)";
+            IsScriptOutputVisible = true;
+            IsBusy = false;
+
+            _assemblyName = "SyncFiles";
+            RefreshIconPath = $"/SyncFiles;component/Resources/Refresh.png";
+            AddGroupIconPath = $"/SyncFiles;component/Resources/AddGroup.png";
+            SyncGitIconPath = $"/SyncFiles;component/Resources/SyncGit.png";
+            ToggleOutputIconPath = $"/SyncFiles;component/Resources/ToggleOutput.png";
+        }
+
+        public SyncFilesToolWindowViewModel(IAsyncServiceProvider serviceProvider)
+        {
+            _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+
+            ScriptGroups = new ObservableCollection<ScriptGroupViewModel>();
+            LogMessages = new ObservableCollection<string>();
+
+            RefreshScriptsCommand = new RelayCommand(
+                async () =>
+                {
+                    if (_serviceProvider is SyncFilesPackage package)
+                    {
+                        package.TriggerReinitializeConfigWatcher();
+                    }
+                    await LoadAndRefreshScriptsAsync(true);
+                },
+                () => !IsBusy);
+
+            AddGroupCommand = new RelayCommand(AddNewGroup, () => !IsBusy);
+
+            SyncGitHubFilesCommand = new RelayCommand(
+                async () => await ExecuteGitHubSyncAsync(false),
+                () => !IsBusy && _gitHubSyncService != null && _settingsManager != null);
+
             LoadSmartWorkflowCommand = new RelayCommand(async () => await LoadSmartWorkflowAsync(), () => !IsBusy);
-            CancelWorkflowCommand = new RelayCommand(CancelWorkflow, () => IsBusy); // Can only cancel if busy
+            CancelWorkflowCommand = new RelayCommand(CancelWorkflow, () => IsBusy);
             SaveSettingsCommand = new RelayCommand(RequestSaveSettings, () => !IsBusy);
+
             ScriptOutputLog = new ObservableCollection<ScriptExecutionOutputLine>();
             CurrentScriptExecutionStatus = "Ready.";
-            IsScriptOutputVisible = false; // Initially hidden or based on a setting
+            IsScriptOutputVisible = false;
 
             ClearScriptOutputCommand = new RelayCommand(ClearScriptOutput, () => ScriptOutputLog.Any());
             ToggleScriptOutputVisibilityCommand = new RelayCommand(() => IsScriptOutputVisible = !IsScriptOutputVisible);
+
             _assemblyName = GetType().Assembly.GetName().Name;
-            UpdateIconsForTheme(); // Initial set
+            UpdateIconsForTheme();
             VSColorTheme.ThemeChanged += OnThemeChanged;
         }
         public async Task InitializeAsync(
@@ -157,64 +196,56 @@ namespace SyncFiles.UI.ViewModels
             IsBusy = true;
             _projectBasePath = projectBasePath;
             _settingsManager = settingsManager;
-            // 如果服务实例可能在 InitializeAsync 被多次调用时发生变化，则需要先解绑旧事件
-            DetachEventHandlers(); // 先解绑，以防万一
+            DetachEventHandlers();
             _gitHubSyncService = gitHubSyncService;
             _fileSystemWatcherService = fileSystemWatcherService;
             _smartWorkflowService = smartWorkflowService;
-            AttachEventHandlers(); // 绑定到（可能新的）服务实例
+            AttachEventHandlers();
 
-            await LoadAndRefreshScriptsAsync(true); // forceScanDisk = true 用于初次加载
-            if (_fileSystemWatcherService != null)
-            {
-                _fileSystemWatcherService.WatchedFileChanged += OnWatchedFileChanged_Handler;
-            }
-            if (_gitHubSyncService != null)
-            {
-                _gitHubSyncService.SynchronizationCompleted += GitHubSyncService_RegularSyncCompleted_Handler;
-            }
-            if (_smartWorkflowService != null)
-            {
-                _smartWorkflowService.WorkflowDownloadPhaseCompleted += SmartWorkflowService_DownloadPhaseCompleted_Handler;
-            }
             await LoadAndRefreshScriptsAsync(true);
-            InitializePythonScriptWatcher();
+            // InitializePythonScriptWatcher(); // Called at the end of LoadAndRefreshScriptsAsync
             AppendLogMessage("SyncFiles Tool Window initialized.");
+            IsBusy = false;
         }
 
         private void OnThemeChanged(ThemeChangedEventArgs e)
         {
+            if (Application.Current == null) return;
+
             Application.Current?.Dispatcher?.Invoke(() =>
             {
                 UpdateIconsForTheme();
-                OnPropertyChanged(nameof(CurrentThemeIsDark)); // Notify if XAML binds to this
+                OnPropertyChanged(nameof(CurrentThemeIsDark));
             });
         }
 
         private bool IsDarkTheme()
         {
-            // Ensure we are on the UI thread or can access UI properties safely
+            if (Application.Current == null) return false;
+
             if (Application.Current != null && Application.Current.Dispatcher.CheckAccess())
             {
                 var backgroundColor = VSColorTheme.GetThemedColor(EnvironmentColors.ToolWindowBackgroundColorKey);
-                // Formula for perceived brightness
                 return (backgroundColor.R * 0.299 + backgroundColor.G * 0.587 + backgroundColor.B * 0.114) < 128;
             }
             else if (Application.Current != null)
             {
-                // If on a background thread, marshal to UI thread
                 return Application.Current.Dispatcher.Invoke(() =>
                 {
                     var backgroundColor = VSColorTheme.GetThemedColor(EnvironmentColors.ToolWindowBackgroundColorKey);
                     return (backgroundColor.R * 0.299 + backgroundColor.G * 0.587 + backgroundColor.B * 0.114) < 128;
                 });
             }
-            // Fallback if Application.Current is null (e.g., design time or unit test)
             return false;
         }
 
         private void UpdateIconsForTheme()
         {
+            if (Application.Current == null && _serviceProvider == null)
+            {
+                return;
+            }
+
             bool isDark = IsDarkTheme();
 
             RefreshIconPath = $"/{_assemblyName};component/Resources/Refresh{(isDark ? "_dark" : "")}.png";
@@ -222,93 +253,126 @@ namespace SyncFiles.UI.ViewModels
             SyncGitIconPath = $"/{_assemblyName};component/Resources/SyncGit{(isDark ? "_dark" : "")}.png";
             ToggleOutputIconPath = $"/{_assemblyName};component/Resources/ToggleOutput{(isDark ? "_dark" : "")}.png";
 
-
             string pythonIcon = $"/{_assemblyName};component/Resources/PythonFileIcon{(isDark ? "_dark" : "")}.png";
             string warningIcon = $"/{_assemblyName};component/Resources/WarningIcon{(isDark ? "_dark" : "")}.png";
             string folderIcon = $"/{_assemblyName};component/Resources/Folder{(isDark ? "_dark" : "")}.png";
 
-            foreach (var groupVM in ScriptGroups)
-            {
-                groupVM.FolderIconPath = folderIcon;
-                foreach (var scriptVM in groupVM.Scripts)
+            Action updateGroupIcons = () => {
+                if (ScriptGroups == null) return;
+                foreach (var groupVM in ScriptGroups)
                 {
-                    scriptVM.NormalScriptIconPath = pythonIcon;
-                    scriptVM.WarningScriptIconPath = warningIcon;
+                    groupVM.FolderIconPath = folderIcon;
+                    foreach (var scriptVM in groupVM.Scripts)
+                    {
+                        scriptVM.NormalScriptIconPath = pythonIcon;
+                        scriptVM.WarningScriptIconPath = warningIcon;
+                    }
                 }
+            };
+
+            if (Application.Current != null && !Application.Current.Dispatcher.CheckAccess())
+            {
+                Application.Current.Dispatcher.Invoke(updateGroupIcons);
+            }
+            else
+            {
+                updateGroupIcons();
+            }
+        }
+
+        public void UpdateFileWatchers(SyncFilesSettingsState settings)
+        {
+            if (_fileSystemWatcherService != null && settings != null)
+            {
+                AppendLogMessage("Updating file watchers based on new settings...");
+                _fileSystemWatcherService.UpdateWatchers(settings);
+                AppendLogMessage("File watchers updated.");
+            }
+            else
+            {
+                AppendLogMessage("[WARN] UpdateFileWatchers called but FileSystemWatcherService or settings are null.");
             }
         }
 
         private void InitializePythonScriptWatcher()
         {
-            StopPythonScriptWatcher(); // Stop existing if any
+            StopPythonScriptWatcher();
 
+            if (_settingsManager == null) return;
             var settings = _settingsManager.LoadSettings(_projectBasePath);
             string scriptPath = settings.PythonScriptPath;
 
-            if (!string.IsNullOrWhiteSpace(scriptPath) && Directory.Exists(scriptPath))
+            if (string.IsNullOrWhiteSpace(scriptPath) || !Directory.Exists(scriptPath))
             {
-                DirectoryInfo scriptDirInfo = new DirectoryInfo(scriptPath);
-                if (scriptDirInfo.Exists) // Watch the directory itself for file changes
-                {
-                    // ... (existing watcher for files inside scriptPath) ...
-                    _pythonScriptDirWatcher = new FileSystemWatcher(scriptPath) { /* ... */ };
-                    // ...
-                    _pythonScriptDirWatcher.EnableRaisingEvents = true;
+                return;
+            }
 
-                }
-                if (scriptDirInfo.Parent != null && scriptDirInfo.Parent.Exists)
+            DirectoryInfo scriptDirInfo = new DirectoryInfo(scriptPath);
+
+            try
+            {
+                _pythonScriptDirWatcher = new FileSystemWatcher(scriptPath)
+                {
+                    Filter = "*.py",
+                    NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.CreationTime,
+                    IncludeSubdirectories = false
+                };
+                _pythonScriptDirWatcher.Changed += OnPythonScriptDirectoryChanged;
+                _pythonScriptDirWatcher.Created += OnPythonScriptDirectoryChanged;
+                _pythonScriptDirWatcher.Deleted += OnPythonScriptDirectoryChanged;
+                _pythonScriptDirWatcher.Renamed += OnPythonScriptDirectoryChanged;
+                _pythonScriptDirWatcher.EnableRaisingEvents = true;
+            }
+            catch (Exception ex)
+            {
+                AppendLogMessage($"[ERROR] Failed to initialize watcher for Python script directory '{scriptPath}': {ex.Message}");
+                _pythonScriptDirWatcher = null;
+            }
+
+            if (scriptDirInfo.Parent != null && scriptDirInfo.Parent.Exists)
+            {
+                try
                 {
                     _pythonScriptParentDirWatcher = new FileSystemWatcher(scriptDirInfo.Parent.FullName)
                     {
                         NotifyFilter = NotifyFilters.DirectoryName,
-                        // No specific filter, we check the name in the event
                     };
                     _pythonScriptParentDirWatcher.Deleted += OnPythonScriptParentDirectoryChanged;
-                    _pythonScriptParentDirWatcher.Renamed += OnPythonScriptParentDirectoryChanged; // Handle rename too
+                    _pythonScriptParentDirWatcher.Renamed += OnPythonScriptParentDirectoryChanged;
                     _pythonScriptParentDirWatcher.EnableRaisingEvents = true;
-                    AppendLogMessage($"Also watching parent directory for changes to: {scriptDirInfo.Name}");
-                }
-
-                try
-                {
-                    _pythonScriptDirWatcher = new FileSystemWatcher(scriptPath)
-                    {
-                        Filter = "*.py",
-                        NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.CreationTime,
-                        IncludeSubdirectories = false // Or true if you want to watch subfolders for scripts
-                    };
-                    _pythonScriptDirWatcher.Changed += OnPythonScriptDirectoryChanged;
-                    _pythonScriptDirWatcher.Created += OnPythonScriptDirectoryChanged;
-                    _pythonScriptDirWatcher.Deleted += OnPythonScriptDirectoryChanged;
-                    _pythonScriptDirWatcher.Renamed += OnPythonScriptDirectoryChanged;
-                    _pythonScriptDirWatcher.EnableRaisingEvents = true;
-                    AppendLogMessage($"Watching Python script directory for changes: {scriptPath}");
                 }
                 catch (Exception ex)
                 {
-                    AppendLogMessage($"[ERROR] Failed to initialize watcher for Python script directory '{scriptPath}': {ex.Message}");
-                    _pythonScriptDirWatcher = null;
+                    AppendLogMessage($"[ERROR] Failed to initialize watcher for parent of Python script directory '{scriptDirInfo.Parent.FullName}': {ex.Message}");
+                    _pythonScriptParentDirWatcher = null;
                 }
-            }
-            else
-            {
-                AppendLogMessage("[INFO] Python script path not configured or directory does not exist. Watcher not started.");
             }
         }
 
         public void SetScriptExecutionStatus(string message)
         {
-            Application.Current.Dispatcher.Invoke(() => // Ensure UI thread
+            if (Application.Current == null) return;
+            Application.Current.Dispatcher.Invoke(() =>
             {
                 CurrentScriptExecutionStatus = message;
-                // Optionally, also add this status message to the main LogMessages
-                // AppendLogMessage($"[SCRIPT EXEC] {message}"); 
             });
         }
         private async void OnPythonScriptParentDirectoryChanged(object sender, FileSystemEventArgs e)
         {
+            if (_settingsManager == null) return;
             var settings = _settingsManager.LoadSettings(_projectBasePath);
-            string currentScriptFolderName = new DirectoryInfo(settings.PythonScriptPath).Name;
+            if (string.IsNullOrEmpty(settings.PythonScriptPath)) return;
+
+            string currentScriptFolderName = "";
+            try
+            {
+                currentScriptFolderName = new DirectoryInfo(settings.PythonScriptPath).Name;
+            }
+            catch (ArgumentException)
+            {
+                AppendLogMessage($"[WARN] Python script path '{settings.PythonScriptPath}' seems invalid after a directory event. Cannot determine folder name.");
+                return;
+            }
 
             if (e.Name.Equals(currentScriptFolderName, StringComparison.OrdinalIgnoreCase))
             {
@@ -324,62 +388,58 @@ namespace SyncFiles.UI.ViewModels
         }
         public void AppendScriptOutput(string scriptName, string outputLine)
         {
-            Application.Current.Dispatcher.Invoke(() => // Ensure UI thread
+            if (Application.Current == null) return;
+            Application.Current.Dispatcher.Invoke(() =>
             {
-                if (!IsScriptOutputVisible && !string.IsNullOrWhiteSpace(outputLine)) IsScriptOutputVisible = true; // Auto-show on first output
+                if (!IsScriptOutputVisible && !string.IsNullOrWhiteSpace(outputLine)) IsScriptOutputVisible = true;
                 ScriptOutputLog.Insert(0, new ScriptExecutionOutputLine(scriptName, outputLine, false));
-                if (ScriptOutputLog.Count > 200) // Limit log size
+                if (ScriptOutputLog.Count > 200)
                 {
                     ScriptOutputLog.RemoveAt(ScriptOutputLog.Count - 1);
                 }
-                ((RelayCommand)ClearScriptOutputCommand).RaiseCanExecuteChanged();
+                (ClearScriptOutputCommand as RelayCommand)?.RaiseCanExecuteChanged();
             });
         }
 
         public void AppendScriptError(string scriptName, string errorLine)
         {
-            Application.Current.Dispatcher.Invoke(() => // Ensure UI thread
+            if (Application.Current == null) return;
+            Application.Current.Dispatcher.Invoke(() =>
             {
-                if (!IsScriptOutputVisible && !string.IsNullOrWhiteSpace(errorLine)) IsScriptOutputVisible = true; // Auto-show on first error
+                if (!IsScriptOutputVisible && !string.IsNullOrWhiteSpace(errorLine)) IsScriptOutputVisible = true;
                 ScriptOutputLog.Insert(0, new ScriptExecutionOutputLine(scriptName, errorLine, true));
-                if (ScriptOutputLog.Count > 200) // Limit log size
+                if (ScriptOutputLog.Count > 200)
                 {
                     ScriptOutputLog.RemoveAt(ScriptOutputLog.Count - 1);
                 }
-                 ((RelayCommand)ClearScriptOutputCommand).RaiseCanExecuteChanged();
+                 (ClearScriptOutputCommand as RelayCommand)?.RaiseCanExecuteChanged();
             });
         }
 
         public void ClearScriptOutput()
         {
-            Application.Current.Dispatcher.Invoke(() => // Ensure UI thread
+            if (Application.Current == null) return;
+            Application.Current.Dispatcher.Invoke(() =>
             {
                 ScriptOutputLog.Clear();
                 CurrentScriptExecutionStatus = "Script output cleared.";
-                ((RelayCommand)ClearScriptOutputCommand).RaiseCanExecuteChanged();
+                (ClearScriptOutputCommand as RelayCommand)?.RaiseCanExecuteChanged();
             });
         }
 
-        // This method is called when the script execution task completes
         public void HandleScriptExecutionCompletion(string scriptName, Core.Services.ScriptExecutionResult result, Exception exception = null)
         {
+            if (Application.Current == null) return;
             Application.Current.Dispatcher.Invoke(() =>
             {
                 if (exception != null)
                 {
                     CurrentScriptExecutionStatus = $"FAILED: {scriptName} - {exception.Message}";
                     AppendScriptError(scriptName, $"EXECUTION EXCEPTION: {exception.Message}");
-                    // Append more details from exception if needed
                 }
                 else if (result != null)
                 {
                     CurrentScriptExecutionStatus = $"DONE: {scriptName} (Exit Code: {result.ExitCode})";
-                    if (!string.IsNullOrWhiteSpace(result.StandardError) && result.ExitCode != 0) // Log remaining stderr if any and exit code indicates error
-                    {
-                        // Note: ExecuteAndCaptureOutputAsync already calls AppendScriptError for each line.
-                        // This is more for a summary or if anything was missed.
-                        // For now, individual lines are preferred.
-                    }
                     if (result.ExitCode != 0)
                     {
                         AppendScriptError(scriptName, $"Exited with code {result.ExitCode}.");
@@ -402,18 +462,24 @@ namespace SyncFiles.UI.ViewModels
                 _pythonScriptDirWatcher.Renamed -= OnPythonScriptDirectoryChanged;
                 _pythonScriptDirWatcher.Dispose();
                 _pythonScriptDirWatcher = null;
-                AppendLogMessage("Python script directory watcher stopped.");
+            }
+            if (_pythonScriptParentDirWatcher != null)
+            {
+                _pythonScriptParentDirWatcher.EnableRaisingEvents = false;
+                _pythonScriptParentDirWatcher.Deleted -= OnPythonScriptParentDirectoryChanged;
+                _pythonScriptParentDirWatcher.Renamed -= OnPythonScriptParentDirectoryChanged;
+                _pythonScriptParentDirWatcher.Dispose();
+                _pythonScriptParentDirWatcher = null;
             }
         }
         private async void OnPythonScriptDirectoryChanged(object sender, FileSystemEventArgs e)
         {
             AppendLogMessage($"Python script directory change detected: {e.ChangeType} on {e.Name}. Refreshing scripts...");
-            // Debounce or delay refresh if many events fire quickly? For now, direct refresh.
             if (Application.Current?.Dispatcher != null)
             {
                 await Application.Current.Dispatcher.InvokeAsync(async () =>
                 {
-                    await LoadAndRefreshScriptsAsync(true); // Force rescan
+                    await LoadAndRefreshScriptsAsync(true);
                 });
             }
         }
@@ -423,14 +489,12 @@ namespace SyncFiles.UI.ViewModels
             AppendLogMessage("Saving configuration changes...");
             try
             {
-                var settings = _settingsManager.LoadSettings(_projectBasePath); // Get current state as base
+                var settings = _settingsManager.LoadSettings(_projectBasePath);
 
-                // Update settings from ViewModels
                 settings.ScriptGroups.Clear();
                 foreach (var groupVM in ScriptGroups)
                 {
-                    var groupModel = groupVM.GetModel(); // Assumes GetModel() returns the up-to-date ScriptGroup
-                    // Ensure scripts within the groupModel are also up-to-date from their VMs
+                    var groupModel = groupVM.GetModel();
                     groupModel.Scripts.Clear();
                     foreach (var scriptVM in groupVM.Scripts)
                     {
@@ -438,23 +502,17 @@ namespace SyncFiles.UI.ViewModels
                     }
                     settings.ScriptGroups.Add(groupModel);
                 }
-                // If Python paths etc. were editable in main tool window, update them too.
-                // For now, settings like Python paths are managed by SettingsWindow.
 
                 _settingsManager.SaveSettings(settings, _projectBasePath);
                 AppendLogMessage("Configuration saved successfully.");
 
-                // After saving, especially if PythonScriptPath changed, re-init watcher
                 InitializePythonScriptWatcher();
-                // Also, if general FileSystemWatcherService depends on these settings, update it.
                 UpdateFileWatchers(settings);
-
-
             }
             catch (Exception ex)
             {
                 AppendLogMessage($"[ERROR] Failed to save settings: {ex.Message}");
-                ShowMessage("Error Saving Settings", ex.Message);
+                ShowErrorMessage("Error Saving Settings", ex.Message);
             }
         }
 
@@ -463,17 +521,16 @@ namespace SyncFiles.UI.ViewModels
             if (scriptVM == null) return;
 
             var availableGroups = ScriptGroups
-                .Where(g => g.Scripts.All(s => s.Id != scriptVM.Id)) // Exclude current group if desired, or all groups
+                .Where(g => g.Scripts.All(s => s.Id != scriptVM.Id))
                 .Select(g => g.Name)
                 .ToList();
 
             if (!availableGroups.Any())
             {
-                ShowMessage("Move Script", "No other groups available to move the script to.");
+                ShowInfoMessage("Move Script", "No other groups available to move the script to.");
                 return;
             }
 
-            // Simple dialog to select group (replace with a proper WPF dialog)
             string targetGroupName = ShowComboBoxDialog("Move Script", $"Move '{scriptVM.DisplayName}' to group:", availableGroups);
 
             if (!string.IsNullOrEmpty(targetGroupName))
@@ -483,8 +540,8 @@ namespace SyncFiles.UI.ViewModels
 
                 if (targetGroupVM != null && sourceGroupVM != null && sourceGroupVM != targetGroupVM)
                 {
-                    sourceGroupVM.RemoveScript(scriptVM); // Removes from VM's collection and model's collection
-                    targetGroupVM.AddScript(scriptVM);   // Adds to VM's collection and model's collection
+                    sourceGroupVM.RemoveScript(scriptVM);
+                    targetGroupVM.AddScript(scriptVM);
                     AppendLogMessage($"Moved script '{scriptVM.DisplayName}' from '{sourceGroupVM.Name}' to '{targetGroupVM.Name}'.");
                     RequestSaveSettings();
                 }
@@ -497,7 +554,6 @@ namespace SyncFiles.UI.ViewModels
             ScriptGroupViewModel sourceGroupVM = ScriptGroups.FirstOrDefault(g => g.Scripts.Contains(scriptVM));
             if (sourceGroupVM != null)
             {
-                // Confirmation dialog
                 if (ShowConfirmDialog("Remove Script", $"Are you sure you want to remove '{scriptVM.DisplayName}' from group '{sourceGroupVM.Name}'?"))
                 {
                     sourceGroupVM.RemoveScript(scriptVM);
@@ -521,16 +577,15 @@ namespace SyncFiles.UI.ViewModels
                 ScriptGroupViewModel defaultGroupVM = ScriptGroups.FirstOrDefault(g => g.IsDefaultGroup);
                 if (defaultGroupVM == null)
                 {
-                    ShowMessage("Error", "Default group not found. Cannot delete group.");
+                    ShowErrorMessage("Error", "Default group not found. Cannot delete group.");
                     return;
                 }
 
-                // Move scripts to default group
-                var scriptsToMove = new List<ScriptEntryViewModel>(groupVMToDelete.Scripts); // Iterate over a copy
+                var scriptsToMove = new List<ScriptEntryViewModel>(groupVMToDelete.Scripts);
                 foreach (var scriptVM in scriptsToMove)
                 {
-                    groupVMToDelete.RemoveScript(scriptVM); // Important to remove from model too
-                    defaultGroupVM.AddScript(scriptVM);     // Important to add to model too
+                    groupVMToDelete.RemoveScript(scriptVM);
+                    defaultGroupVM.AddScript(scriptVM);
                 }
 
                 ScriptGroups.Remove(groupVMToDelete);
@@ -539,27 +594,79 @@ namespace SyncFiles.UI.ViewModels
             }
         }
 
-
-        // Placeholder for input dialogs - IMPLEMENT THESE AS REAL WPF WINDOWS
         public string ShowInputDialog(string title, string prompt, string defaultValue = "", bool multiline = false)
         {
-            // TODO: Replace with a proper WPF Input Dialog Window.
-            // This is a very basic placeholder.
-            var inputDialog = new Window { Title = title, Width = 300, Height = multiline ? 200 : 150, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var inputDialog = new System.Windows.Window
+            {
+                Title = title,
+                Width = 350,
+                MinWidth = 300,
+                SizeToContent = SizeToContent.Height,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ShowInTaskbar = false,
+            };
+
+            Brush windowBackground = System.Windows.Media.Brushes.Transparent;
+            Brush windowForeground = System.Windows.Media.Brushes.Black;
+
+            if (Application.Current != null && Application.Current.Resources.Contains(VsBrushes.WindowKey))
+            {
+                windowBackground = (Brush)Application.Current.Resources[VsBrushes.WindowKey];
+                inputDialog.Background = windowBackground;
+            }
+            if (Application.Current != null && Application.Current.Resources.Contains(VsBrushes.WindowTextKey))
+            {
+                windowForeground = (Brush)Application.Current.Resources[VsBrushes.WindowTextKey];
+                inputDialog.Foreground = windowForeground;
+            }
+
             if (Application.Current?.MainWindow?.IsVisible == true) inputDialog.Owner = Application.Current.MainWindow;
 
-            var panel = new StackPanel { Margin = new Thickness(10) };
-            panel.Children.Add(new TextBlock { Text = prompt, Margin = new Thickness(0, 0, 0, 5) });
+            var panel = new StackPanel { Margin = new Thickness(15) };
+
+            var promptTextBlock = new TextBlock
+            {
+                Text = prompt,
+                Margin = new Thickness(0, 0, 0, 8),
+                Foreground = windowForeground
+            };
+            panel.Children.Add(promptTextBlock);
+
             TextBox inputTextBox;
             if (multiline)
-                inputTextBox = new TextBox { Text = defaultValue, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 70, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+                inputTextBox = new TextBox
+                {
+                    Text = defaultValue,
+                    AcceptsReturn = true,
+                    TextWrapping = TextWrapping.Wrap,
+                    MinHeight = 70,
+                    MaxHeight = 150,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                };
             else
                 inputTextBox = new TextBox { Text = defaultValue };
-            panel.Children.Add(inputTextBox);
 
-            var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
-            var okButton = new Button { Content = "OK", IsDefault = true, Width = 75, Margin = new Thickness(0, 0, 5, 0) };
-            var cancelButton = new Button { Content = "Cancel", IsCancel = true, Width = 75 };
+            if (Application.Current != null && Application.Current.Resources.Contains(VsResourceKeys.TextBoxStyleKey))
+                inputTextBox.Style = (Style)Application.Current.Resources[VsResourceKeys.TextBoxStyleKey];
+            else
+            {
+                inputTextBox.Foreground = windowForeground;
+            }
+
+            panel.Children.Add(inputTextBox);
+            inputDialog.Loaded += (s, e) => inputTextBox.Focus();
+
+
+            var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 15, 0, 0) };
+            var okButton = new Button { Content = "OK", IsDefault = true, MinWidth = 75, Margin = new Thickness(0, 0, 10, 0) };
+            var cancelButton = new Button { Content = "Cancel", IsCancel = true, MinWidth = 75 };
+
+            if (Application.Current != null && Application.Current.Resources.Contains(VsResourceKeys.ButtonStyleKey))
+            {
+                okButton.Style = (Style)Application.Current.Resources[VsResourceKeys.ButtonStyleKey];
+                cancelButton.Style = (Style)Application.Current.Resources[VsResourceKeys.ButtonStyleKey];
+            }
+
             buttonPanel.Children.Add(okButton);
             buttonPanel.Children.Add(cancelButton);
             panel.Children.Add(buttonPanel);
@@ -575,20 +682,62 @@ namespace SyncFiles.UI.ViewModels
 
         public string ShowComboBoxDialog(string title, string prompt, List<string> items)
         {
-            // TODO: Replace with a proper WPF ComboBox Dialog Window.
             if (items == null || !items.Any()) return null;
 
-            var dialog = new Window { Title = title, Width = 300, Height = 180, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+            var dialog = new System.Windows.Window
+            {
+                Title = title,
+                Width = 350,
+                MinWidth = 300,
+                SizeToContent = SizeToContent.Height,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ShowInTaskbar = false,
+            };
+            Brush windowBackground = System.Windows.Media.Brushes.Transparent;
+            Brush windowForeground = System.Windows.Media.Brushes.Black;
+
+            if (Application.Current != null && Application.Current.Resources.Contains(VsBrushes.WindowKey))
+            {
+                windowBackground = (Brush)Application.Current.Resources[VsBrushes.WindowKey];
+                dialog.Background = windowBackground;
+            }
+            if (Application.Current != null && Application.Current.Resources.Contains(VsBrushes.WindowTextKey))
+            {
+                windowForeground = (Brush)Application.Current.Resources[VsBrushes.WindowTextKey];
+                dialog.Foreground = windowForeground;
+            }
+
             if (Application.Current?.MainWindow?.IsVisible == true) dialog.Owner = Application.Current.MainWindow;
 
-            var panel = new StackPanel { Margin = new Thickness(10) };
-            panel.Children.Add(new TextBlock { Text = prompt, Margin = new Thickness(0, 0, 0, 5) });
-            var comboBox = new ComboBox { ItemsSource = items, SelectedIndex = 0 };
-            panel.Children.Add(comboBox);
+            var panel = new StackPanel { Margin = new Thickness(15) };
+            var promptTextBlock = new TextBlock
+            {
+                Text = prompt,
+                Margin = new Thickness(0, 0, 0, 8),
+                Foreground = windowForeground
+            };
+            panel.Children.Add(promptTextBlock);
 
-            var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 10, 0, 0) };
-            var okButton = new Button { Content = "OK", IsDefault = true, Width = 75, Margin = new Thickness(0, 0, 5, 0) };
-            var cancelButton = new Button { Content = "Cancel", IsCancel = true, Width = 75 };
+            var comboBox = new ComboBox { ItemsSource = items, SelectedIndex = 0 };
+            if (Application.Current != null && Application.Current.Resources.Contains(VsResourceKeys.ComboBoxStyleKey))
+                comboBox.Style = (Style)Application.Current.Resources[VsResourceKeys.ComboBoxStyleKey];
+            else
+            {
+                comboBox.Foreground = windowForeground;
+            }
+
+            panel.Children.Add(comboBox);
+            dialog.Loaded += (s, e) => comboBox.Focus();
+
+
+            var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 15, 0, 0) };
+            var okButton = new Button { Content = "OK", IsDefault = true, MinWidth = 75, Margin = new Thickness(0, 0, 10, 0) };
+            var cancelButton = new Button { Content = "Cancel", IsCancel = true, MinWidth = 75 };
+            if (Application.Current != null && Application.Current.Resources.Contains(VsResourceKeys.ButtonStyleKey))
+            {
+                okButton.Style = (Style)Application.Current.Resources[VsResourceKeys.ButtonStyleKey];
+                cancelButton.Style = (Style)Application.Current.Resources[VsResourceKeys.ButtonStyleKey];
+            }
             buttonPanel.Children.Add(okButton);
             buttonPanel.Children.Add(cancelButton);
             panel.Children.Add(buttonPanel);
@@ -602,39 +751,81 @@ namespace SyncFiles.UI.ViewModels
             return (dialog.DialogResult == true) ? result : null;
         }
 
-        public bool ShowConfirmDialog(string title, string message)
+        private async Task ShowMessageCoreAsync(string title, string message, OLEMSGICON icon)
         {
-            // Use MessageBox for simplicity, or create a custom dialog
-            MessageBoxResult result = MessageBox.Show(Application.Current?.MainWindow, message, title, MessageBoxButton.YesNo, MessageBoxImage.Question);
-            return result == MessageBoxResult.Yes;
-        }
-        public void ShowMessage(string title, string message)
-        {
-            MessageBox.Show(Application.Current?.MainWindow, message, title, MessageBoxButton.OK, MessageBoxImage.Information);
+            if (_serviceProvider == null)
+            {
+                System.Windows.MessageBox.Show(message, title);
+                return;
+            }
+
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            var serviceProvider = (IServiceProvider)_serviceProvider;
+            var uiShell = serviceProvider.GetService(typeof(SVsUIShell)) as IVsUIShell;
+
+            if (uiShell == null)
+            {
+                System.Windows.MessageBox.Show(message, title);
+                return;
+            }
+            Guid clsid = Guid.Empty;
+            Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(uiShell.ShowMessageBox(
+                0, ref clsid, title, message, string.Empty, 0,
+                OLEMSGBUTTON.OLEMSGBUTTON_OK, OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST,
+                icon, 0, out _));
         }
 
-        private void AppendLogMessage(string message)
+        public async void ShowInfoMessage(string title, string message) => await ShowMessageCoreAsync(title, message, OLEMSGICON.OLEMSGICON_INFO);
+        public async void ShowWarningMessage(string title, string message) => await ShowMessageCoreAsync(title, message, OLEMSGICON.OLEMSGICON_WARNING);
+        public async void ShowErrorMessage(string title, string message) => await ShowMessageCoreAsync(title, message, OLEMSGICON.OLEMSGICON_CRITICAL);
+
+        public bool ShowConfirmDialog(string title, string message)
         {
-            const int maxLogEntries = 200;
+            if (_serviceProvider == null)
+            {
+                return System.Windows.MessageBox.Show(message, title, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+            }
+            return ThreadHelper.JoinableTaskFactory.Run(async delegate
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                var serviceProvider = (IServiceProvider)_serviceProvider;
+                var uiShell = serviceProvider.GetService(typeof(SVsUIShell)) as IVsUIShell;
+
+                if (uiShell == null)
+                {
+                    return System.Windows.MessageBox.Show(message, title, MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+                }
+                Guid clsid = Guid.Empty;
+                int result;
+                Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(uiShell.ShowMessageBox(
+                    0, ref clsid, title, message, string.Empty, 0,
+                    OLEMSGBUTTON.OLEMSGBUTTON_YESNO, OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST,
+                    OLEMSGICON.OLEMSGICON_QUERY, 0, out result));
+                return result == 6;
+            });
+        }
+
+        public void AppendLogMessage(string message)
+        {
+            if (Application.Current == null && _serviceProvider == null) return;
+
+            const int maxLogEntries = 100;
             string formattedMessage = $"[{DateTime.Now:HH:mm:ss}] {message}";
 
             Action updateAction = () =>
             {
-                lock (_logMessagesLock) // Synchronize access to LogMessages
+                lock (_logMessagesLock)
                 {
                     LogMessages.Insert(0, formattedMessage);
                     if (LogMessages.Count > maxLogEntries)
                     {
-                        // Check if collection has items before removing.
-                        // This check might be redundant if Insert always makes count > 0,
-                        // but it's safer with potential multi-threading scenarios affecting count before lock.
                         if (LogMessages.Count > 0)
                         {
                             LogMessages.RemoveAt(LogMessages.Count - 1);
                         }
                     }
                 }
-                StatusMessage = message; // Update a simpler single status message too (already on UI thread if here)
+                StatusMessage = message;
             };
 
             if (Application.Current?.Dispatcher != null && !Application.Current.Dispatcher.CheckAccess())
@@ -643,46 +834,43 @@ namespace SyncFiles.UI.ViewModels
             }
             else
             {
-                updateAction(); // Already on UI thread or no dispatcher
+                updateAction();
             }
         }
-        private async void OnWatchedFileChanged_Handler(string scriptToExecute, string eventType, string affectedFile)
+        private void OnWatchedFileChanged_Handler(string scriptToExecute, string eventType, string affectedFile)
         {
-            AppendLogMessage($"File event: {eventType} on '{Path.GetFileName(affectedFile)}'. Triggering script: '{Path.GetFileName(scriptToExecute)}'");
+            if (_settingsManager == null) return;
             var settings = _settingsManager.LoadSettings(_projectBasePath);
             if (string.IsNullOrEmpty(settings.PythonExecutablePath) || !File.Exists(settings.PythonExecutablePath))
             {
-                AppendLogMessage($"[ERROR] Python executable not configured or not found ('{settings.PythonExecutablePath}'). Cannot run script '{Path.GetFileName(scriptToExecute)}'.");
+                AppendScriptError(Path.GetFileName(scriptToExecute), $"Python executable not configured or not found ('{settings.PythonExecutablePath}'). Cannot run script.");
                 return;
             }
             var executor = new ScriptExecutor(_projectBasePath);
             var arguments = new List<string> { eventType, affectedFile };
-            try
-            {
-                _ = Task.Run(async () => {
-                    try
-                    {
-                        var result = await executor.ExecuteAndCaptureOutputAsync(
-                            settings.PythonExecutablePath,
-                            scriptToExecute,
-                            arguments,
-                            settings.EnvVariables,
-                            Path.GetDirectoryName(scriptToExecute), // Usually script's own directory
-                            stdout => AppendLogMessage($"SCRIPT[{Path.GetFileName(scriptToExecute)}]: {stdout}"),
-                            stderr => AppendLogMessage($"SCRIPT_ERR[{Path.GetFileName(scriptToExecute)}]: {stderr}")
-                        );
-                        AppendLogMessage($"Script '{Path.GetFileName(scriptToExecute)}' (event-triggered) finished with exit code {result.ExitCode}.");
-                    }
-                    catch (Exception exInner)
-                    {
-                        AppendLogMessage($"[ERROR] Executing watched script '{Path.GetFileName(scriptToExecute)}' (async) failed: {exInner.Message}");
-                    }
-                });
-            }
-            catch (Exception exOuter) // Should be rare as Task.Run handles its exceptions
-            {
-                AppendLogMessage($"[ERROR] Failed to start background task for watched script '{Path.GetFileName(scriptToExecute)}': {exOuter.Message}");
-            }
+
+            AppendScriptOutput(Path.GetFileName(scriptToExecute), $"Event: {eventType} on '{affectedFile}'. Executing...");
+
+            System.Threading.Tasks.Task.Run(async () => {
+                try
+                {
+                    var result = await executor.ExecuteAndCaptureOutputAsync(
+                        settings.PythonExecutablePath,
+                        scriptToExecute,
+                        arguments,
+                        settings.EnvVariables,
+                        Path.GetDirectoryName(scriptToExecute),
+                        stdout => AppendScriptOutput(Path.GetFileName(scriptToExecute), stdout),
+                        stderr => AppendScriptError(Path.GetFileName(scriptToExecute), stderr)
+                    );
+                    HandleScriptExecutionCompletion(Path.GetFileName(scriptToExecute), result);
+                }
+                catch (Exception exInner)
+                {
+                    AppendScriptError(Path.GetFileName(scriptToExecute), $"EXECUTION EXCEPTION (async): {exInner.Message}");
+                    HandleScriptExecutionCompletion(Path.GetFileName(scriptToExecute), null, exInner);
+                }
+            });
         }
         private void GitHubSyncService_RegularSyncCompleted_Handler(object sender, EventArgs e)
         {
@@ -691,6 +879,7 @@ namespace SyncFiles.UI.ViewModels
         private async void SmartWorkflowService_DownloadPhaseCompleted_Handler(object sender, EventArgs eventArgs)
         {
             AppendLogMessage("Smart workflow: File download phase complete. Proceeding to finalize configuration...");
+            IsBusy = true;
             try
             {
                 if (_smartWorkflowService == null)
@@ -699,210 +888,346 @@ namespace SyncFiles.UI.ViewModels
                     IsBusy = false;
                     return;
                 }
-                _smartWorkflowService.FinalizeWorkflowConfiguration(); // This is a synchronous call on SmartWorkflowService
+                _smartWorkflowService.FinalizeWorkflowConfiguration();
                 AppendLogMessage("Smart workflow: Configuration finalized successfully by service.");
                 AppendLogMessage("Reloading settings and refreshing UI after workflow finalization...");
                 var latestSettings = _settingsManager.LoadSettings(_projectBasePath);
                 _fileSystemWatcherService?.UpdateWatchers(latestSettings);
                 AppendLogMessage("File watchers updated based on new workflow settings.");
-                await LoadAndRefreshScriptsAsync(true); // Force rescan, workflow likely changed scripts/paths
+                await LoadAndRefreshScriptsAsync(true);
                 AppendLogMessage("Scripts tree refreshed after workflow.");
             }
             catch (Exception ex)
             {
                 AppendLogMessage($"[ERROR] Smart workflow: Failed during configuration finalization or UI refresh: {ex.Message}");
-                Console.WriteLine($"[ERROR] SmartWorkflow_DownloadPhaseCompleted_Handler: {ex.ToString()}");
-            }
-            finally
-            {
-                IsBusy = false; // Ensure busy is cleared
-                _workflowCts?.Dispose();
-                _workflowCts = null;
-            }
-        }
-        // In SyncFilesToolWindowViewModel.cs
-        public async Task OpenFileInIdeAsync(string filePath)
-        {
-            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
-            {
-                ShowMessage("Error", $"File not found: {filePath}");
-                return;
-            }
-
-            try
-            {
-                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(); // Ensure on main thread for DTE
-                var dte = await SyncFilesPackage.GetGlobalServiceAsync(typeof(EnvDTE.DTE)) as EnvDTE.DTE;
-                if (dte != null)
-                {
-                    dte.ItemOperations.OpenFile(filePath);
-                }
-                else
-                {
-                    ShowMessage("Error", "Visual Studio DTE service not available to open file.");
-                    // Fallback to Process.Start as a last resort
-                    // Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true }); // Removed as per request
-                }
-            }
-            catch (Exception ex)
-            {
-                AppendLogMessage($"[ERROR] Failed to open script file '{filePath}' in IDE: {ex.Message}");
-                ShowMessage("Error Opening File", $"Could not open file in IDE: {ex.Message}");
-                // try { Process.Start(new ProcessStartInfo(filePath) { UseShellExecute = true }); } catch { } // Fallback Removed
-            }
-        }
-        public async Task LoadAndRefreshScriptsAsync(bool forceScanDisk)
-        {
-            if (_settingsManager == null || string.IsNullOrEmpty(_projectBasePath))
-            {
-                AppendLogMessage("[ERROR] Settings manager or project path not initialized. Cannot load scripts.");
-                return;
-            }
-            IsBusy = true; // Set busy before starting the async work
-            ((RelayCommand)RefreshScriptsCommand)?.RaiseCanExecuteChanged(); // Update command states
-            AppendLogMessage(forceScanDisk ? "Loading settings and scanning script directory..." : "Loading settings and refreshing script tree...");
-            InitializePythonScriptWatcher();
-            try
-            {
-                await Task.Run(() => // Perform potentially long-running load/scan on a background thread
-                {
-                    var settings = _settingsManager.LoadSettings(_projectBasePath);
-                    string pythonScriptBasePath = settings.PythonScriptPath;
-                    string pythonExecutable = settings.PythonExecutablePath;
-                    List<ScriptGroup> configuredGroupsModels = new List<ScriptGroup>(settings.ScriptGroups);
-                    ScriptGroup defaultGroupModel = configuredGroupsModels.FirstOrDefault(g => g.Id == ScriptGroup.DefaultGroupId);
-                    if (defaultGroupModel == null)
-                    {
-                        defaultGroupModel = new ScriptGroup(ScriptGroup.DefaultGroupId, ScriptGroup.DefaultGroupName);
-                        configuredGroupsModels.Insert(0, defaultGroupModel);
-                    }
-                    if (forceScanDisk && !string.IsNullOrWhiteSpace(pythonScriptBasePath) && Directory.Exists(pythonScriptBasePath))
-                    {
-                        HashSet<string> diskScriptRelativePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                        try
-                        {
-                            diskScriptRelativePaths.UnionWith(
-                                Directory.GetFiles(pythonScriptBasePath, "*.py", SearchOption.TopDirectoryOnly)
-                                    .Select(p => GetRelativePath(p, pythonScriptBasePath))
-                            );
-                        }
-                        catch (Exception ex)
-                        {
-                            Application.Current.Dispatcher.Invoke(() => AppendLogMessage($"[ERROR] Error scanning script directory '{pythonScriptBasePath}': {ex.Message}"));
-                        }
-                        var allCurrentScriptModels = configuredGroupsModels.SelectMany(g => g.Scripts).ToList();
-                        foreach (var scriptModel in allCurrentScriptModels)
-                        {
-                            scriptModel.IsMissing = !diskScriptRelativePaths.Contains(scriptModel.Path);
-                        }
-                        defaultGroupModel.Scripts.RemoveAll(s => s.IsMissing && s.Id != ScriptEntryViewModel.PlaceHolderId); // Placeholder if any
-                        var allExistingPathsInModel = new HashSet<string>(allCurrentScriptModels.Where(s => !s.IsMissing).Select(s => s.Path), StringComparer.OrdinalIgnoreCase);
-                        foreach (string diskPath in diskScriptRelativePaths)
-                        {
-                            if (!allExistingPathsInModel.Contains(diskPath))
-                            {
-                                var newEntry = new ScriptEntry(diskPath) { Description = $"Auto-added {DateTime.Now:yyyy/MM/dd}" };
-                                defaultGroupModel.Scripts.Add(newEntry);
-                                allExistingPathsInModel.Add(diskPath);
-                            }
-                        }
-                        settings.ScriptGroups = configuredGroupsModels;
-                        _settingsManager.SaveSettings(settings, _projectBasePath);
-                    }
-                    else if (string.IsNullOrWhiteSpace(pythonScriptBasePath) || !Directory.Exists(pythonScriptBasePath))
-                    {
-                        if (forceScanDisk) AppendLogMessage(string.IsNullOrWhiteSpace(pythonScriptBasePath) ? "[INFO] Python script path is not configured." : $"[WARN] Python script directory not found: {pythonScriptBasePath}");
-                        foreach (var groupModel in configuredGroupsModels)
-                            foreach (var scriptModel in groupModel.Scripts)
-                                scriptModel.IsMissing = true;
-                    }
-                    Application.Current.Dispatcher.Invoke(() =>
-                    {
-                        ScriptGroups.Clear();
-                        var sortedGroupModels = configuredGroupsModels.OrderBy(g => g.Id == ScriptGroup.DefaultGroupId ? 0 : 1)
-                                                         .ThenBy(g => g.Name, StringComparer.OrdinalIgnoreCase);
-                        foreach (var groupModel in sortedGroupModels)
-                        {
-                            var groupVM = new ScriptGroupViewModel(groupModel, pythonExecutable, pythonScriptBasePath, settings.EnvVariables, _projectBasePath, this);
-                            // Icon paths for groupVM and its scriptVMs will be set by UpdateIconsForTheme call below
-                            ScriptGroups.Add(groupVM);
-                        }
-                        AppendLogMessage("Scripts tree UI refreshed.");
-                    });
-                });
-            }
-            catch (Exception ex)
-            {
-                AppendLogMessage($"[ERROR] Failed to load/refresh scripts: {ex.Message}");
-                Console.WriteLine($"[ERROR] LoadAndRefreshScriptsAsync: {ex.ToString()}");
+                System.Diagnostics.Debug.WriteLine($"[ERROR] SmartWorkflow_DownloadPhaseCompleted_Handler: {ex.ToString()}");
             }
             finally
             {
                 IsBusy = false;
-                UpdateIconsForTheme(); // Ensure icons are set for newly loaded VMs
-                ((RelayCommand)RefreshScriptsCommand)?.RaiseCanExecuteChanged(); // Update command states
+                _workflowCts?.Dispose();
+                _workflowCts = null;
             }
         }
+
+        public async Task OpenFileInIdeAsync(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath)) return;
+
+            AppendLogMessage($"Opening file in IDE: {Path.GetFileName(filePath)}...");
+            IsBusy = true;
+            try
+            {
+                if (!File.Exists(filePath))
+                {
+                    await ShowErrorMessageAsync("Error Opening File", $"File not found: {filePath}");
+                    AppendLogMessage($"[ERROR] File not found for opening: {filePath}");
+                    return;
+                }
+
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                var dte = await _serviceProvider.GetServiceAsync(typeof(SDTE)) as EnvDTE.DTE;
+                if (dte != null)
+                {
+                    EnvDTE.Window wnd = dte.ItemOperations.OpenFile(filePath, EnvDTE.Constants.vsViewKindCode);
+                    if (wnd != null)
+                    {
+                        wnd.Activate();
+                        AppendLogMessage($"File '{Path.GetFileName(filePath)}' opened successfully via DTE.");
+                    }
+                    else
+                    {
+                        AppendLogMessage($"[WARN] DTE.OpenFile did not return a window object for '{Path.GetFileName(filePath)}', but operation may have succeeded.");
+                    }
+                }
+                else
+                {
+                    AppendLogMessage("[ERROR] Visual Studio DTE service not available to open file.");
+                    await ShowErrorMessageAsync("Error Opening File", "Visual Studio DTE service not available.");
+                }
+            }
+            catch (Exception ex)
+            {
+                AppendLogMessage($"[ERROR] Failed to open script file '{Path.GetFileName(filePath)}' in IDE: {ex.Message}");
+                await ShowErrorMessageAsync("Error Opening File", $"Could not open file in IDE: {ex.Message}");
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        private async Task ShowErrorMessageAsync(string title, string message)
+        {
+            await ShowMessageCoreAsync(title, message, OLEMSGICON.OLEMSGICON_CRITICAL);
+        }
+
+        public async Task LoadAndRefreshScriptsAsync(bool forceScanDisk)
+        {
+            if (_serviceProvider is SyncFilesPackage package)
+            {
+                package.TriggerReinitializeConfigWatcher();
+            }
+
+            if (_settingsManager == null)
+            {
+                AppendLogMessage("[ERROR] Settings manager not initialized. Cannot load scripts.");
+                if (ScriptGroups != null && Application.Current?.Dispatcher != null)
+                    Application.Current.Dispatcher.Invoke(() => ScriptGroups.Clear());
+                else if (ScriptGroups != null)
+                    ScriptGroups.Clear();
+                IsBusy = false;
+                return;
+            }
+            if (string.IsNullOrEmpty(_projectBasePath) && forceScanDisk)
+            {
+                AppendLogMessage("[INFO] No project/solution open. Scripts cannot be scanned from disk. Displaying configured scripts only.");
+                forceScanDisk = false;
+            }
+
+            IsBusy = true;
+            AppendLogMessage(forceScanDisk ? "Loading settings and scanning script directory..." : "Loading settings and refreshing script tree...");
+
+            try
+            {
+                await ThreadHelper.JoinableTaskFactory.RunAsync(async delegate
+                {
+                    SyncFilesSettingsState settings = null; // Declare here to be accessible in the finally-like block for UI update
+                    List<ScriptGroupViewModel> newScriptGroups = new List<ScriptGroupViewModel>();
+
+                    try
+                    {
+                        settings = _settingsManager.LoadSettings(_projectBasePath);
+                        string pythonScriptBasePath = settings.PythonScriptPath;
+                        string pythonExecutable = settings.PythonExecutablePath;
+                        List<ScriptGroup> configuredGroupsModels = new List<ScriptGroup>(settings.ScriptGroups);
+                        ScriptGroup defaultGroupModel = configuredGroupsModels.FirstOrDefault(g => g.Id == ScriptGroup.DefaultGroupId);
+                        if (defaultGroupModel == null)
+                        {
+                            defaultGroupModel = new ScriptGroup(ScriptGroup.DefaultGroupId, ScriptGroup.DefaultGroupName);
+                            configuredGroupsModels.Insert(0, defaultGroupModel);
+                        }
+
+                        bool settingsModifiedByScan = false;
+
+                        if (forceScanDisk && !string.IsNullOrWhiteSpace(pythonScriptBasePath) && Directory.Exists(pythonScriptBasePath))
+                        {
+                            HashSet<string> diskScriptRelativePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            try
+                            {
+                                diskScriptRelativePaths.UnionWith(
+                                    Directory.GetFiles(pythonScriptBasePath, "*.py", SearchOption.TopDirectoryOnly)
+                                        .Select(p => GetRelativePath(p, pythonScriptBasePath))
+                                );
+                            }
+                            catch (Exception ex_scan)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"[ERROR] Error scanning script directory '{pythonScriptBasePath}': {ex_scan.Message}");
+                                string scanErrorMessage = $"[ERROR] Error scanning script directory '{pythonScriptBasePath}': {ex_scan.Message}";
+                                Application.Current?.Dispatcher?.Invoke(() => AppendLogMessage(scanErrorMessage));
+                            }
+                            var allCurrentScriptModels = configuredGroupsModels.SelectMany(g => g.Scripts).ToList();
+                            foreach (var scriptModel in allCurrentScriptModels)
+                            {
+                                scriptModel.IsMissing = !diskScriptRelativePaths.Contains(scriptModel.Path);
+                            }
+
+                            int removedCount = defaultGroupModel.Scripts.RemoveAll(s => s.IsMissing && s.Id != ScriptEntryViewModel.PlaceHolderId);
+                            if (removedCount > 0) settingsModifiedByScan = true;
+
+                            var allExistingPathsInModel = new HashSet<string>(allCurrentScriptModels.Where(s => !s.IsMissing).Select(s => s.Path), StringComparer.OrdinalIgnoreCase);
+                            foreach (string diskPath in diskScriptRelativePaths)
+                            {
+                                if (!allExistingPathsInModel.Contains(diskPath))
+                                {
+                                    var newEntry = new ScriptEntry(diskPath) { Description = $"Auto-added {DateTime.Now:yyyy/MM/dd}" };
+                                    defaultGroupModel.Scripts.Add(newEntry);
+                                    allExistingPathsInModel.Add(diskPath);
+                                    settingsModifiedByScan = true;
+                                }
+                            }
+                            if (settingsModifiedByScan)
+                            {
+                                settings.ScriptGroups = configuredGroupsModels;
+                                _settingsManager.SaveSettings(settings, _projectBasePath);
+                            }
+                        }
+                        else if (string.IsNullOrWhiteSpace(pythonScriptBasePath) || !Directory.Exists(pythonScriptBasePath))
+                        {
+                            if (forceScanDisk)
+                            {
+                                string msg = string.IsNullOrWhiteSpace(pythonScriptBasePath) ? "[INFO] Python script path is not configured." : $"[WARN] Python script directory not found: {pythonScriptBasePath}";
+                                Application.Current?.Dispatcher?.Invoke(() => AppendLogMessage(msg));
+                            }
+                            foreach (var groupModel in configuredGroupsModels)
+                                foreach (var scriptModel in groupModel.Scripts)
+                                    scriptModel.IsMissing = true;
+                        }
+
+                        var sortedGroupModels = configuredGroupsModels.OrderBy(g => g.Id == ScriptGroup.DefaultGroupId ? 0 : 1)
+                                                                     .ThenBy(g => g.Name, StringComparer.OrdinalIgnoreCase);
+                        foreach (var groupModel in sortedGroupModels)
+                        {
+                            var groupVM = new ScriptGroupViewModel(groupModel, pythonExecutable, pythonScriptBasePath, settings.EnvVariables, _projectBasePath, this);
+                            newScriptGroups.Add(groupVM);
+                        }
+                    }
+                    catch (Exception ex_load_process)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[ERROR] Exception during script data load/processing: {ex_load_process}");
+                        Application.Current?.Dispatcher?.Invoke(() => AppendLogMessage($"[ERROR] Failed to process script data: {ex_load_process.Message}"));
+                    }
+
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(CancellationToken.None);
+
+                    try
+                    {
+                        ScriptGroups.Clear();
+                        foreach (var groupVM in newScriptGroups)
+                        {
+                            ScriptGroups.Add(groupVM);
+                        }
+                        AppendLogMessage("Scripts tree UI refreshed.");
+                        InitializePythonScriptWatcher();
+                        UpdateIconsForTheme();
+
+                        if (_settingsManager != null && settings != null)
+                        {
+                            UpdateFileWatchers(settings);
+                        }
+                    }
+                    catch (Exception ex_ui_update)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[ERROR] Exception during UI update in LoadAndRefreshScriptsAsync: {ex_ui_update}");
+                        AppendLogMessage($"[ERROR] Failed to update script UI: {ex_ui_update.Message}");
+                    }
+                });
+            }
+            catch (Exception ex_outer)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ERROR] Outer exception in LoadAndRefreshScriptsAsync: {ex_outer}");
+                AppendLogMessage($"[ERROR] Failed to load/refresh scripts: {ex_outer.Message}");
+            }
+            finally
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(CancellationToken.None);
+                IsBusy = false;
+                (RefreshScriptsCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            }
+        }
+
         private string GetRelativePath(string fullPath, string basePath)
         {
-            if (!string.IsNullOrEmpty(basePath) && !basePath.EndsWith(Path.DirectorySeparatorChar.ToString()) && !basePath.EndsWith(Path.AltDirectorySeparatorChar.ToString()))
+            if (string.IsNullOrEmpty(basePath))
+            {
+                return fullPath;
+            }
+            if (!basePath.EndsWith(Path.DirectorySeparatorChar.ToString()) && !basePath.EndsWith(Path.AltDirectorySeparatorChar.ToString()))
             {
                 basePath += Path.DirectorySeparatorChar;
             }
+
             Uri baseUri = new Uri(basePath, UriKind.Absolute);
             Uri fullUri = new Uri(fullPath, UriKind.Absolute);
-            return Uri.UnescapeDataString(baseUri.MakeRelativeUri(fullUri).ToString().Replace('/', Path.DirectorySeparatorChar));
+
+            if (baseUri.IsBaseOf(fullUri))
+            {
+                return Uri.UnescapeDataString(baseUri.MakeRelativeUri(fullUri).ToString().Replace('/', Path.DirectorySeparatorChar));
+            }
+            else
+            {
+                return fullPath;
+            }
         }
+
         private void AddNewGroup()
         {
-            string groupName = "New Group " + (ScriptGroups.Count(g => g.Id != ScriptGroup.DefaultGroupId) + 1); // Example
-            if (string.IsNullOrWhiteSpace(groupName)) return;
-            var settings = _settingsManager.LoadSettings(_projectBasePath);
-            if (settings.ScriptGroups.Any(g => g.Name.Equals(groupName, StringComparison.OrdinalIgnoreCase)))
+            int newGroupCounter = 1;
+            string baseName = "New Group ";
+            string groupName;
+            do
             {
-                AppendLogMessage($"[WARN] Group '{groupName}' already exists.");
+                groupName = baseName + newGroupCounter++;
+            } while (IsGroupNameDuplicate(groupName, null));
+
+            string finalGroupName = ShowInputDialog("Add New Group", "Enter group name:", groupName);
+            if (string.IsNullOrWhiteSpace(finalGroupName)) return;
+
+            finalGroupName = finalGroupName.Trim();
+            if (IsGroupNameDuplicate(finalGroupName, null))
+            {
+                ShowWarningMessage("Add Group", $"Group '{finalGroupName}' already exists.");
                 return;
             }
-            var newGroupModel = new ScriptGroup(Guid.NewGuid().ToString(), groupName.Trim());
+
+            if (_settingsManager == null)
+            {
+                ShowErrorMessage("Error", "Settings Manager is not available.");
+                return;
+            }
+
+            var settings = _settingsManager.LoadSettings(_projectBasePath);
+            var newGroupModel = new ScriptGroup(Guid.NewGuid().ToString(), finalGroupName);
             settings.ScriptGroups.Add(newGroupModel);
             _settingsManager.SaveSettings(settings, _projectBasePath);
+
             var groupVM = new ScriptGroupViewModel(newGroupModel, settings.PythonExecutablePath, settings.PythonScriptPath, settings.EnvVariables, _projectBasePath, this);
-            Application.Current.Dispatcher.Invoke(() => ScriptGroups.Add(groupVM)); // Add to UI
-            AppendLogMessage($"Group '{groupName}' added.");
+
+            Application.Current?.Dispatcher?.Invoke(() => ScriptGroups.Add(groupVM));
+            AppendLogMessage($"Group '{finalGroupName}' added.");
         }
-        private async Task SyncGitHubFilesAsync(bool isPartOfWorkflow)
+
+        private async Task ExecuteGitHubSyncAsync(bool isPartOfWorkflow)
         {
             if (_gitHubSyncService == null || _settingsManager == null)
             {
                 AppendLogMessage("[ERROR] GitHub sync service or settings manager not initialized.");
                 return;
             }
+
             IsBusy = true;
             AppendLogMessage("Starting GitHub file synchronization...");
+
             try
             {
-                var settings = _settingsManager.LoadSettings(_projectBasePath);
-                await _gitHubSyncService.SyncAllAsync(settings, _workflowCts?.Token ?? CancellationToken.None);
-                if (!isPartOfWorkflow) // Only do these if it's a standalone sync
+                await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
                 {
+                    var settings = _settingsManager.LoadSettings(_projectBasePath);
+                    await _gitHubSyncService.SyncAllAsync(settings, _workflowCts?.Token ?? CancellationToken.None);
+                });
+
+                if (!isPartOfWorkflow)
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                     AppendLogMessage("GitHub sync (standalone) completed.");
                     await LoadAndRefreshScriptsAsync(true);
-                    _fileSystemWatcherService?.UpdateWatchers(settings);
+
+                    var currentSettings = _settingsManager.LoadSettings(_projectBasePath);
+                    _fileSystemWatcherService?.UpdateWatchers(currentSettings);
                 }
             }
             catch (OperationCanceledException)
             {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 AppendLogMessage("[CANCELLED] GitHub sync was cancelled.");
             }
             catch (Exception ex)
             {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 AppendLogMessage($"[ERROR] GitHub sync failed: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"[ERROR] ExecuteGitHubSyncAsync: {ex}");
             }
             finally
             {
-                if (!isPartOfWorkflow) IsBusy = false; // Only set to false if not part of a larger workflow operation
+                if (!isPartOfWorkflow)
+                {
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    IsBusy = false;
+                }
             }
         }
+
         private async Task LoadSmartWorkflowAsync()
         {
             if (_smartWorkflowService == null || _settingsManager == null || _gitHubSyncService == null)
@@ -910,57 +1235,40 @@ namespace SyncFiles.UI.ViewModels
                 AppendLogMessage("[ERROR] Workflow services not initialized.");
                 return;
             }
-            string yamlUrl = string.Empty; // Default to empty
-            var inputDialog = new Window { Title = "Load Smart Workflow", Width = 450, Height = 180, WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false };
-            if (Application.Current != null && Application.Current.MainWindow != null && Application.Current.MainWindow.IsVisible)
-            {
-                inputDialog.Owner = Application.Current.MainWindow; // Set owner if possible
-            }
-            var panel = new StackPanel { Margin = new Thickness(10) };
-            panel.Children.Add(new TextBlock { Text = "Enter YAML Configuration URL:", Margin = new Thickness(0, 0, 0, 5) });
-            var urlTextBox = new TextBox { Text = "https://raw.githubusercontent.com/sammiler/CodeConf/refs/heads/main/Cpp/SyncFiles/Clion/workflow.yaml", Margin = new Thickness(0, 0, 0, 10), Padding = new Thickness(2) };
-            panel.Children.Add(urlTextBox);
-            var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-            var okButton = new Button { Content = "Load", IsDefault = true, Width = 75, Margin = new Thickness(0, 0, 5, 0) };
-            var cancelButton = new Button { Content = "Cancel", IsCancel = true, Width = 75 };
-            buttonPanel.Children.Add(okButton);
-            buttonPanel.Children.Add(cancelButton);
-            panel.Children.Add(buttonPanel);
-            inputDialog.Content = panel;
-            bool? dialogResult = null;
-            okButton.Click += (s, e) => { yamlUrl = urlTextBox.Text; dialogResult = true; inputDialog.Close(); };
-            cancelButton.Click += (s, e) => { dialogResult = false; inputDialog.Close(); };
-            if (Application.Current != null)
-            {
-                inputDialog.ShowDialog();
-            }
-            else
-            {
-                AppendLogMessage("[WARN] Cannot show URL dialog outside of WPF app context. Workflow load might fail if URL is not preset.");
-            }
-            if (dialogResult != true || string.IsNullOrWhiteSpace(yamlUrl))
+
+            string yamlUrl = ShowInputDialog("Load Smart Workflow", "Enter YAML Configuration URL:", "https://raw.githubusercontent.com/sammiler/CodeConf/refs/heads/main/Cpp/SyncFiles/Clion/workflow.yaml");
+
+            if (string.IsNullOrWhiteSpace(yamlUrl))
             {
                 AppendLogMessage("Smart workflow loading cancelled or URL is empty.");
                 return;
             }
+
             IsBusy = true;
             AppendLogMessage($"Loading smart workflow from: {yamlUrl}...");
-            _workflowCts = new CancellationTokenSource(); // Create a new CTS for this operation
+            _workflowCts = new CancellationTokenSource();
+
             try
             {
-                await _smartWorkflowService.PrepareWorkflowFromYamlUrlAsync(yamlUrl, _workflowCts.Token);
+                await ThreadHelper.JoinableTaskFactory.RunAsync(async () =>
+                {
+                    await _smartWorkflowService.PrepareWorkflowFromYamlUrlAsync(yamlUrl, _workflowCts.Token);
+                });
             }
             catch (OperationCanceledException)
             {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 AppendLogMessage("[CANCELLED] Smart workflow operation was cancelled.");
-                IsBusy = false; // Ensure IsBusy is reset if preparation itself is cancelled
+                IsBusy = false;
                 _workflowCts?.Dispose();
                 _workflowCts = null;
             }
             catch (Exception ex)
             {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
                 AppendLogMessage($"[ERROR] Smart workflow loading failed during preparation: {ex.Message}");
-                IsBusy = false; // Reset IsBusy on error during prepare
+                System.Diagnostics.Debug.WriteLine($"[ERROR] LoadSmartWorkflowAsync: {ex}");
+                IsBusy = false;
                 _workflowCts?.Dispose();
                 _workflowCts = null;
             }
@@ -981,10 +1289,9 @@ namespace SyncFiles.UI.ViewModels
         public void RequestAddScriptToGroup(ScriptGroupViewModel groupVM) { AppendLogMessage($"TODO: Add script to {groupVM.Name}"); }
         public void RequestRenameGroup(ScriptGroupViewModel groupVM) { AppendLogMessage($"TODO: Rename Group {groupVM.Name}"); }
 
-        // 新增/修改: 当项目路径或服务实例改变时，用于更新 ViewModel 上下文的方法
         public async Task UpdateProjectContextAsync(
             string newProjectBasePath,
-            GitHubSyncService newGitHubSyncService,       // 包可能会传递新的服务实例
+            GitHubSyncService newGitHubSyncService,
             FileSystemWatcherService newFileSystemWatcherService,
             SmartWorkflowService newSmartWorkflowService)
         {
@@ -993,54 +1300,40 @@ namespace SyncFiles.UI.ViewModels
                                    _fileSystemWatcherService != newFileSystemWatcherService ||
                                    _smartWorkflowService != newSmartWorkflowService;
 
-            // 如果路径和服务实例都没变，可能不需要做太多事情
-            if (!pathChanged && !servicesChanged && _settingsManager != null /*确保settingsManager已初始化*/)
+            if (!pathChanged && !servicesChanged && _settingsManager != null)
             {
-                // AppendLogMessage("项目上下文无显著变化。");
-                // 即使路径和服务没变，可能配置变了，也考虑刷新一下脚本和监听器
-                // 这一步可选，取决于你希望刷新的时机多么频繁
-                // await LoadAndRefreshScriptsAsync(false); // false 表示不强制扫描磁盘，仅根据配置刷新
-                // if (!string.IsNullOrEmpty(newProjectBasePath)) {
-                //     var currentSettings = _settingsManager.LoadSettings(newProjectBasePath);
-                //     UpdateFileWatchers(currentSettings);
-                // }
                 return;
             }
 
-            AppendLogMessage($"正在更新 ViewModel 项目上下文。新路径: '{newProjectBasePath ?? "null"}'。服务实例是否重新分配: {servicesChanged}");
+            AppendLogMessage($"Updating ViewModel project context. New path: '{newProjectBasePath ?? "null"}'");
 
-            _projectBasePath = newProjectBasePath; // 更新内部的项目路径
+            _projectBasePath = newProjectBasePath;
 
-            // 如果服务实例本身发生了变化 (例如，被 Package 重新创建了)
             if (servicesChanged)
             {
-                DetachEventHandlers(); // 从旧的服务实例解绑事件
+                DetachEventHandlers();
 
                 _gitHubSyncService = newGitHubSyncService;
                 _fileSystemWatcherService = newFileSystemWatcherService;
                 _smartWorkflowService = newSmartWorkflowService;
 
-                AttachEventHandlers(); // 绑定到新的服务实例
+                AttachEventHandlers();
             }
 
-            // 如果路径改变了，或者有其他强制刷新逻辑，则重新加载脚本和监听器
-            // LoadAndRefreshScriptsAsync 必须能健壮地处理 _projectBasePath 为 null 的情况
-            await LoadAndRefreshScriptsAsync(true); // forceScanDisk = true 以反映新路径或空状态
+            await LoadAndRefreshScriptsAsync(true);
 
-            // 根据新路径和当前设置更新文件监听器
-            if (_settingsManager != null && !string.IsNullOrEmpty(_projectBasePath))
+            if (_settingsManager != null)
             {
                 var currentSettings = _settingsManager.LoadSettings(_projectBasePath);
                 UpdateFileWatchers(currentSettings);
             }
-            else if (_fileSystemWatcherService != null) // 如果路径现在为 null，确保监听器被清除
+            else
             {
-                _fileSystemWatcherService.UpdateWatchers(new SyncFilesSettingsState());
+                _fileSystemWatcherService?.UpdateWatchers(new SyncFilesSettingsState());
             }
-            AppendLogMessage("ViewModel 项目上下文更新完毕。");
+            AppendLogMessage("ViewModel project context updated.");
         }
 
-        // 用于添加和移除服务事件处理的辅助方法
         private void AttachEventHandlers()
         {
             if (_fileSystemWatcherService != null)
@@ -1050,7 +1343,7 @@ namespace SyncFiles.UI.ViewModels
             if (_gitHubSyncService != null)
             {
                 _gitHubSyncService.SynchronizationCompleted += GitHubSyncService_RegularSyncCompleted_Handler;
-                _gitHubSyncService.ProgressReported += GitHubSyncService_ProgressReported_Handler; // 添加进度报告处理
+                _gitHubSyncService.ProgressReported += GitHubSyncService_ProgressReported_Handler;
             }
             if (_smartWorkflowService != null)
             {
@@ -1073,40 +1366,30 @@ namespace SyncFiles.UI.ViewModels
             {
                 _smartWorkflowService.WorkflowDownloadPhaseCompleted -= SmartWorkflowService_DownloadPhaseCompleted_Handler;
             }
-            VSColorTheme.ThemeChanged -= OnThemeChanged; // Unsubscribe
         }
 
-        // GitHub 同步进度报告的处理方法
         private void GitHubSyncService_ProgressReported_Handler(string progressMessage)
         {
-            AppendLogMessage($"[同步] {progressMessage}");
+            AppendLogMessage($"[Sync] {progressMessage}");
         }
 
         public void Dispose()
         {
             StopPythonScriptWatcher();
-            if (_fileSystemWatcherService != null)
-            {
-                // Note: These events are detached in DetachEventHandlers, called by UpdateProjectContextAsync
-                // If Dispose can be called independently, ensure these are removed.
-                _fileSystemWatcherService.WatchedFileChanged -= OnWatchedFileChanged_Handler;
-            }
-            if (_gitHubSyncService != null)
-            {
-                _gitHubSyncService.SynchronizationCompleted -= GitHubSyncService_RegularSyncCompleted_Handler;
-            }
-            if (_smartWorkflowService != null)
-            {
-                _smartWorkflowService.WorkflowDownloadPhaseCompleted -= SmartWorkflowService_DownloadPhaseCompleted_Handler;
-                _smartWorkflowService.UnsubscribeGitHubSyncEvents(); // Crucial
-            }
+            DetachEventHandlers();
+
             VSColorTheme.ThemeChanged -= OnThemeChanged;
+
             _workflowCts?.Dispose();
-            LogMessages.Clear();
-            Console.WriteLine("SyncFilesToolWindowViewModel Disposed.");
+            if (LogMessages != null)
+            {
+                lock (_logMessagesLock)
+                {
+                    LogMessages.Clear();
+                }
+            }
+            System.Diagnostics.Debug.WriteLine("SyncFilesToolWindowViewModel Disposed.");
         }
-
-
     }
 }
 public static class ScriptEntryViewModelExtensions

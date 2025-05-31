@@ -324,7 +324,7 @@ namespace SyncFiles.UI.ViewModels
             if (!File.Exists(fullScriptPath))
             {
                 IsMissing = true;
-                _parentViewModel.ShowMessage("Error", $"Script file not found: {fullScriptPath}");
+                _parentViewModel.ShowErrorMessage("Error", $"Script file not found: {fullScriptPath}");
                 Console.WriteLine($"[ERROR] Script file not found for opening: {fullScriptPath}");
                 return;
             }

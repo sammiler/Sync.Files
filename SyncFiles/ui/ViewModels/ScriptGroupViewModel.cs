@@ -73,7 +73,7 @@ namespace SyncFiles.UI.ViewModels
                 }
                 else
                 {
-                    _parentViewModel.ShowMessage("Error", "Group name already exists.");
+                    _parentViewModel.ShowErrorMessage("Error", "Group name already exists.");
                 }
             }
         }

@@ -1,8 +1,7 @@
-﻿// File: UI/ViewModels/SettingsWindowViewModel.cs
-using SyncFiles.Core.Management;
+﻿using SyncFiles.Core.Management;
 using SyncFiles.Core.Models;
 using SyncFiles.Core.Settings;
-using SyncFiles.UI.Common; // For RelayCommand
+using SyncFiles.UI.Common;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -10,13 +9,16 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Windows;
-using System.Windows.Forms; // For FolderBrowserDialog and OpenFileDialog - Add reference to System.Windows.Forms assembly
+using System.Windows.Forms;
 using System.Windows.Input;
-using Application = System.Windows.Application; // To resolve ambiguity with System.Windows.Forms.Application
+using Application = System.Windows.Application;
+using Microsoft.VisualStudio.Threading;
+using SyncFiles;
+using Microsoft.VisualStudio.Shell;
+using System.Threading.Tasks;
 
 namespace SyncFiles.UI.ViewModels
 {
-    // Helper class for DataGrid items (to enable easy property changes for existing models)
     public class MappingViewModel : ViewModelBase
     {
         private string _sourceUrl;
@@ -69,10 +71,10 @@ namespace SyncFiles.UI.ViewModels
     public class SettingsWindowViewModel : ViewModelBase
     {
         private readonly SyncFilesSettingsManager _settingsManager;
-        private readonly string _projectBasePath;
-        private SyncFilesSettingsState _originalSettings; // To check for modifications
+        private readonly string _projectBasePath; // This is the project base path *at the time the settings window is opened*
+        private SyncFilesSettingsState _originalSettings;
+        private readonly IAsyncServiceProvider _serviceProvider; // To get access to the Package
 
-        // Settings Properties for Binding
         public ObservableCollection<MappingViewModel> Mappings { get; }
         public MappingViewModel SelectedMapping { get; set; }
 
@@ -88,7 +90,6 @@ namespace SyncFiles.UI.ViewModels
         public ObservableCollection<EnvironmentVariableViewModel> EnvironmentVariables { get; }
         public EnvironmentVariableViewModel SelectedEnvironmentVariable { get; set; }
 
-        // Commands
         public ICommand AddMappingCommand { get; }
         public ICommand RemoveMappingCommand { get; }
         public ICommand AddWatchEntryCommand { get; }
@@ -103,12 +104,14 @@ namespace SyncFiles.UI.ViewModels
         public ICommand CancelCommand { get; }
 
         public event EventHandler<bool> RequestCloseDialog;
+        private bool _isApplyingSettings = false;
 
 
-        public SettingsWindowViewModel(SyncFilesSettingsManager settingsManager, string projectBasePath)
+        public SettingsWindowViewModel(SyncFilesSettingsManager settingsManager, string projectBasePath, IAsyncServiceProvider serviceProvider)
         {
             _settingsManager = settingsManager;
             _projectBasePath = projectBasePath;
+            _serviceProvider = serviceProvider; // Store the service provider (Package)
 
             Mappings = new ObservableCollection<MappingViewModel>();
             WatchEntries = new ObservableCollection<WatchEntryViewModel>();
@@ -116,7 +119,6 @@ namespace SyncFiles.UI.ViewModels
 
             LoadSettings();
 
-            // Initialize Commands
             AddMappingCommand = new RelayCommand(() => Mappings.Add(new MappingViewModel("", "")));
             RemoveMappingCommand = new RelayCommand(() => { if (SelectedMapping != null) Mappings.Remove(SelectedMapping); },
                                                  () => SelectedMapping != null);
@@ -132,11 +134,8 @@ namespace SyncFiles.UI.ViewModels
             RemoveEnvironmentVariableCommand = new RelayCommand(() => { if (SelectedEnvironmentVariable != null) EnvironmentVariables.Remove(SelectedEnvironmentVariable); },
                                                              () => SelectedEnvironmentVariable != null);
 
-            ApplyCommand = new RelayCommand(() => {
-                ApplySettings();
-                RequestCloseDialog?.Invoke(this, true); // Add this line to also close the dialog
-            }, () => IsModified);
-            ApplyAndCloseCommand = new RelayCommand(() => { ApplySettings(); RequestCloseDialog?.Invoke(this, true); });
+            ApplyCommand = new RelayCommand(async () => await ApplySettingsAsync(false), () => IsModified && !_isApplyingSettings);
+            ApplyAndCloseCommand = new RelayCommand(async () => await ApplySettingsAsync(true), () => !_isApplyingSettings);
             CancelCommand = new RelayCommand(() => RequestCloseDialog?.Invoke(this, false));
         }
 
@@ -144,57 +143,25 @@ namespace SyncFiles.UI.ViewModels
         private void LoadSettings()
         {
             _originalSettings = _settingsManager.LoadSettings(_projectBasePath);
-            System.Diagnostics.Debug.WriteLine($"[LoadSettings] Loaded _originalSettings. Mappings count: {_originalSettings.Mappings?.Count ?? 0}");
-            if (_originalSettings.Mappings != null && _originalSettings.Mappings.Count > 0)
-            {
-                System.Diagnostics.Debug.WriteLine($"[LoadSettings] Original Mapping[0]: Source='{_originalSettings.Mappings[0].SourceUrl}', Target='{_originalSettings.Mappings[0].TargetPath}'");
-            }
 
-            Mappings.Clear(); // ObservableCollection for the UI
-            System.Diagnostics.Debug.WriteLine($"[LoadSettings] Mappings collection cleared. Count: {Mappings.Count}");
-
-            if (_originalSettings.Mappings != null) // Null check for safety
+            Mappings.Clear();
+            if (_originalSettings.Mappings != null)
             {
                 foreach (var m in _originalSettings.Mappings)
                 {
-                    if (m == null)
-                    {
-                        System.Diagnostics.Debug.WriteLine("[LoadSettings] Encountered a null mapping object in _originalSettings.Mappings. Skipping.");
-                        continue;
-                    }
-                    System.Diagnostics.Debug.WriteLine($"[LoadSettings] Processing original mapping: Source='{m.SourceUrl}', Target='{m.TargetPath}'");
-
-                    var newMappingVm = new MappingViewModel(m.SourceUrl, m.TargetPath);
-                    System.Diagnostics.Debug.WriteLine($"[LoadSettings] Created MappingViewModel: Source='{newMappingVm.SourceUrl}', Target='{newMappingVm.TargetPath}'");
-
-                    Mappings.Add(newMappingVm);
-                    System.Diagnostics.Debug.WriteLine($"[LoadSettings] Added to Mappings collection. New count: {Mappings.Count}");
-                    if (Mappings.Count > 0)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"[LoadSettings] Mappings[0] after add: Source='{Mappings[0].SourceUrl}', Target='{Mappings[0].TargetPath}'");
-                    }
+                    if (m != null) Mappings.Add(new MappingViewModel(m.SourceUrl, m.TargetPath));
                 }
             }
-            else
-            {
-                System.Diagnostics.Debug.WriteLine("[LoadSettings] _originalSettings.Mappings is null.");
-            }
-            System.Diagnostics.Debug.WriteLine($"[LoadSettings] Finished populating Mappings. Final count: {Mappings.Count}");
 
-
-            // Populate other settings
             WatchEntries.Clear();
             if (_originalSettings.WatchEntries != null)
             {
                 foreach (var w in _originalSettings.WatchEntries)
                     WatchEntries.Add(new WatchEntryViewModel(w.WatchedPath, w.OnEventScript));
             }
-            System.Diagnostics.Debug.WriteLine($"[LoadSettings] Finished populating WatchEntries. Final count: {WatchEntries.Count}");
 
             PythonScriptPath = _originalSettings.PythonScriptPath;
-            System.Diagnostics.Debug.WriteLine($"[LoadSettings] PythonScriptPath set to: '{PythonScriptPath}'");
             PythonExecutablePath = _originalSettings.PythonExecutablePath;
-            System.Diagnostics.Debug.WriteLine($"[LoadSettings] PythonExecutablePath set to: '{PythonExecutablePath}'");
 
             EnvironmentVariables.Clear();
             if (_originalSettings.EnvironmentVariablesList != null)
@@ -202,103 +169,201 @@ namespace SyncFiles.UI.ViewModels
                 foreach (var ev in _originalSettings.EnvironmentVariablesList)
                     EnvironmentVariables.Add(new EnvironmentVariableViewModel(ev.Name, ev.Value));
             }
-            System.Diagnostics.Debug.WriteLine($"[LoadSettings] Finished populating EnvironmentVariables. Final count: {EnvironmentVariables.Count}");
         }
 
-        private void ApplySettings()
+        private async Task ApplySettingsAsync(bool closeAfterApply)
         {
-            var newSettings = new SyncFilesSettingsState
+            if (_isApplyingSettings) return;
+            _isApplyingSettings = true;
+            (ApplyCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (ApplyAndCloseCommand as RelayCommand)?.RaiseCanExecuteChanged();
+
+            bool settingsAppliedSuccessfully = false;
+            SyncFilesPackage package = _serviceProvider as SyncFilesPackage;
+
+            try
             {
-                Mappings = Mappings.Select(vm => vm.ToModel()).ToList(),
-                WatchEntries = WatchEntries.Select(vm => vm.ToModel()).ToList(),
-                PythonScriptPath = this.PythonScriptPath?.Trim() ?? string.Empty,
-                PythonExecutablePath = this.PythonExecutablePath?.Trim() ?? string.Empty,
-                EnvironmentVariablesList = EnvironmentVariables.Select(vm => vm.ToModel()).ToList(),
-                // Preserve script groups - this settings window doesn't manage them directly
-                ScriptGroups = _originalSettings.ScriptGroups
-            };
+                package?.SuspendConfigWatcher(); // Suspend watcher before saving
 
-            // Basic Validation (can be expanded)
-            foreach (var mapping in newSettings.Mappings)
-            {
-                if (string.IsNullOrWhiteSpace(mapping.SourceUrl) || string.IsNullOrWhiteSpace(mapping.TargetPath))
+                settingsAppliedSuccessfully = await Task.Run(() =>
                 {
-                    System.Windows.MessageBox.Show("Mappings cannot have empty Source URL or Target Path.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
-                }
-            }
-            // Add more validation as needed for other fields
-            foreach (var watchEntryVm in WatchEntries)
-            {
-                string resolvedWatchedPath = ResolvePath(watchEntryVm.WatchedPath); // You'll need ResolvePath
-                string resolvedScriptPath = ResolvePathInScriptsDir(watchEntryVm.OnEventScript); // You'll need this too
+                    var newSettings = new SyncFilesSettingsState
+                    {
+                        Mappings = Mappings.Select(vm => vm.ToModel()).ToList(),
+                        WatchEntries = new List<WatchEntry>(),
+                        PythonScriptPath = this.PythonScriptPath?.Trim() ?? string.Empty,
+                        PythonExecutablePath = this.PythonExecutablePath?.Trim() ?? string.Empty,
+                        EnvironmentVariablesList = EnvironmentVariables.Select(vm => vm.ToModel()).ToList(),
+                        ScriptGroups = _originalSettings.ScriptGroups
+                    };
 
-                if (string.IsNullOrWhiteSpace(resolvedWatchedPath)) { /* error */ return; }
-                if (string.IsNullOrWhiteSpace(resolvedScriptPath)) { /* error */ return; }
+                    foreach (var mapping in newSettings.Mappings)
+                    {
+                        if (string.IsNullOrWhiteSpace(mapping.SourceUrl) || string.IsNullOrWhiteSpace(mapping.TargetPath))
+                        {
+                            Application.Current?.Dispatcher?.Invoke(() =>
+                                System.Windows.MessageBox.Show("Mappings cannot have empty Source URL or Target Path.", "Validation Error", MessageBoxButton.OK, MessageBoxImage.Error));
+                            return false;
+                        }
+                    }
 
-                if (!File.Exists(resolvedWatchedPath) && !Directory.Exists(resolvedWatchedPath))
-                {
-                    System.Windows.MessageBox.Show($"Watcher Error: Watched path '{watchEntryVm.WatchedPath}' (resolved to '{resolvedWatchedPath}') does not exist.", "Settings Validation", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return; // Stop saving
-                }
-                if (!File.Exists(resolvedScriptPath))
-                {
-                    System.Windows.MessageBox.Show($"Watcher Error: Script '{watchEntryVm.OnEventScript}' (resolved to '{resolvedScriptPath}') for watcher does not exist.", "Settings Validation", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return; // Stop saving
-                }
-            }
-            _settingsManager.SaveSettings(newSettings, _projectBasePath);
-            _originalSettings = newSettings; // Update original settings after saving
+                    var tempWatchEntriesData = WatchEntries.Select(vm => new { vm.WatchedPath, vm.OnEventScript }).ToList();
+                    foreach (var watchEntryData in tempWatchEntriesData)
+                    {
+                        string resolvedWatchedPath = ResolvePath(watchEntryData.WatchedPath);
+                        string resolvedScriptPath = ResolvePathInScriptsDir(watchEntryData.OnEventScript, newSettings.PythonScriptPath);
 
-            // Optionally, notify other parts of the application that settings have changed
-            // This might involve a message bus or events if other ViewModels need to react
-            Console.WriteLine("[INFO] SettingsWindowViewModel: Settings applied and saved.");
+                        bool watchPathProvided = !string.IsNullOrWhiteSpace(watchEntryData.WatchedPath);
+                        bool scriptPathProvided = !string.IsNullOrWhiteSpace(watchEntryData.OnEventScript);
 
-            // If the main tool window ViewModel needs to refresh after settings change:
-            if (SyncFilesPackage.ToolWindowViewModel != null)
-            {
-                Application.Current.Dispatcher.Invoke(async () =>
-                {
-                    await SyncFilesPackage.ToolWindowViewModel.LoadAndRefreshScriptsAsync(true); 
-                                                                                                 
-                    var currentLoadedSettings = _settingsManager.LoadSettings(_projectBasePath); 
-                    SyncFilesPackage.ToolWindowViewModel.UpdateFileWatchers(currentLoadedSettings);
+                        if (watchPathProvided)
+                        {
+                            if (string.IsNullOrWhiteSpace(resolvedWatchedPath) || (!File.Exists(resolvedWatchedPath) && !Directory.Exists(resolvedWatchedPath)))
+                            {
+                                Application.Current?.Dispatcher?.Invoke(() =>
+                                    System.Windows.MessageBox.Show($"Watcher Error: Watched path '{watchEntryData.WatchedPath}' (resolved to '{resolvedWatchedPath}') does not exist or is invalid.", "Settings Validation", MessageBoxButton.OK, MessageBoxImage.Error));
+                                return false;
+                            }
+                        }
+                        if (scriptPathProvided)
+                        {
+                            if (string.IsNullOrWhiteSpace(resolvedScriptPath) || !File.Exists(resolvedScriptPath))
+                            {
+                                Application.Current?.Dispatcher?.Invoke(() =>
+                                    System.Windows.MessageBox.Show($"Watcher Error: Script '{watchEntryData.OnEventScript}' (resolved to '{resolvedScriptPath}') for watcher does not exist or is invalid.", "Settings Validation", MessageBoxButton.OK, MessageBoxImage.Error));
+                                return false;
+                            }
+                        }
+
+                        if (watchPathProvided && scriptPathProvided)
+                        {
+                            newSettings.WatchEntries.Add(new WatchEntry(resolvedWatchedPath, resolvedScriptPath));
+                        }
+                        else if (watchPathProvided && !scriptPathProvided)
+                        {
+                            Application.Current?.Dispatcher?.Invoke(() =>
+                                   System.Windows.MessageBox.Show($"Watcher Error: Watched path '{watchEntryData.WatchedPath}' is specified, but no script to run.", "Settings Validation", MessageBoxButton.OK, MessageBoxImage.Error));
+                            return false;
+                        }
+                        else if (!watchPathProvided && scriptPathProvided)
+                        {
+                            Application.Current?.Dispatcher?.Invoke(() =>
+                                   System.Windows.MessageBox.Show($"Watcher Error: Script '{watchEntryData.OnEventScript}' is specified, but no path to watch.", "Settings Validation", MessageBoxButton.OK, MessageBoxImage.Error));
+                            return false;
+                        }
+                    }
+
+                    _settingsManager.SaveSettings(newSettings, _projectBasePath);
+                    _originalSettings = newSettings;
+                    System.Diagnostics.Debug.WriteLine("[INFO] SettingsWindowViewModel: Settings applied and saved by Task.Run.");
+                    return true;
                 });
+
+                // No explicit refresh call here; ResumeConfigWatcher(true) will trigger it.
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ERROR] ApplySettingsAsync outer error: {ex}");
+                Application.Current?.Dispatcher?.Invoke(() =>
+                   System.Windows.MessageBox.Show($"An unexpected error occurred while applying settings: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error));
+                settingsAppliedSuccessfully = false;
+            }
+            finally
+            {
+                // Resume watcher *after* all saving and potential UI updates from this window are done.
+                // The ResumeConfigWatcher(true) will trigger the necessary refresh in the main tool window.
+                package?.ResumeConfigWatcher(settingsAppliedSuccessfully);
+
+                _isApplyingSettings = false;
+                Application.Current?.Dispatcher?.Invoke(() => {
+                    (ApplyCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                    (ApplyAndCloseCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                });
+
+                // Close dialog only if apply was successful and closeAfterApply is true
+                if (closeAfterApply && settingsAppliedSuccessfully)
+                {
+                    RequestCloseDialog?.Invoke(this, true);
+                }
             }
         }
-        // Helper methods in SettingsWindowViewModel:
+
         private string ResolvePath(string path)
         {
-            if (string.IsNullOrWhiteSpace(path)) return path;
-            // Basic resolution, assuming $PROJECT_DIR$ or absolute
-            string tempPath = path.Replace("$PROJECT_DIR$", _projectBasePath);
+            if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+            string tempPath = path;
+            if (!string.IsNullOrEmpty(_projectBasePath))
+            {
+                tempPath = tempPath.Replace("$PROJECT_DIR$", _projectBasePath);
+            }
             tempPath = Environment.ExpandEnvironmentVariables(tempPath);
-            if (!System.IO.Path.IsPathRooted(tempPath))
-            {
-                tempPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(_projectBasePath, tempPath));
-            }
-            return tempPath;
-        }
-        private string ResolvePathInScriptsDir(string relativeOrAbsolutePathToScript)
-        {
-            if (string.IsNullOrWhiteSpace(relativeOrAbsolutePathToScript)) return relativeOrAbsolutePathToScript;
-            if (System.IO.Path.IsPathRooted(relativeOrAbsolutePathToScript)) return relativeOrAbsolutePathToScript;
+            if (string.IsNullOrEmpty(tempPath)) return string.Empty;
 
-            // If PythonScriptPath is set and valid, resolve relative to it
-            if (!string.IsNullOrWhiteSpace(this.PythonScriptPath) && Directory.Exists(this.PythonScriptPath))
+            try
             {
-                return System.IO.Path.GetFullPath(System.IO.Path.Combine(this.PythonScriptPath, relativeOrAbsolutePathToScript));
+                if (!System.IO.Path.IsPathRooted(tempPath))
+                {
+                    if (string.IsNullOrEmpty(_projectBasePath) || !Directory.Exists(_projectBasePath))
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[WARN] ResolvePath: Cannot resolve relative path '{path}' without a valid project base path.");
+                        return string.Empty;
+                    }
+                    tempPath = System.IO.Path.GetFullPath(System.IO.Path.Combine(_projectBasePath, tempPath));
+                }
+                else
+                {
+                    tempPath = System.IO.Path.GetFullPath(tempPath);
+                }
+                return tempPath;
             }
-            // Fallback: resolve relative to project if script path is not set/valid
-            return System.IO.Path.GetFullPath(System.IO.Path.Combine(_projectBasePath, relativeOrAbsolutePathToScript));
+            catch (ArgumentException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ERROR] ResolvePath: Invalid path characters in '{path}'. Details: {ex.Message}");
+                return string.Empty;
+            }
+        }
+
+        private string ResolvePathInScriptsDir(string relativeOrAbsolutePathToScript, string currentPythonScriptPath)
+        {
+            if (string.IsNullOrWhiteSpace(relativeOrAbsolutePathToScript)) return string.Empty;
+
+            try
+            {
+                if (System.IO.Path.IsPathRooted(relativeOrAbsolutePathToScript))
+                    return System.IO.Path.GetFullPath(relativeOrAbsolutePathToScript);
+
+                string scriptBase = currentPythonScriptPath;
+                if (string.IsNullOrWhiteSpace(scriptBase) || !Directory.Exists(scriptBase))
+                {
+                    if (string.IsNullOrEmpty(_projectBasePath) || !Directory.Exists(_projectBasePath))
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[WARN] ResolvePathInScriptsDir: Cannot resolve relative script '{relativeOrAbsolutePathToScript}' without a valid Python script path or project base path.");
+                        return string.Empty;
+                    }
+                    scriptBase = _projectBasePath;
+                }
+                return System.IO.Path.GetFullPath(System.IO.Path.Combine(scriptBase, relativeOrAbsolutePathToScript));
+            }
+            catch (ArgumentException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ERROR] ResolvePathInScriptsDir: Invalid path characters in '{relativeOrAbsolutePathToScript}'. Details: {ex.Message}");
+                return string.Empty;
+            }
         }
 
         private void BrowseForPythonScriptPath()
         {
             using (var dialog = new FolderBrowserDialog())
-                {
+            {
                 dialog.Description = "Select Python Scripts Directory";
-                dialog.SelectedPath = PythonScriptPath; // Start from current path if set
+                if (!string.IsNullOrEmpty(PythonScriptPath) && Directory.Exists(PythonScriptPath))
+                {
+                    dialog.SelectedPath = PythonScriptPath;
+                }
+                else if (!string.IsNullOrEmpty(_projectBasePath) && Directory.Exists(_projectBasePath))
+                {
+                    dialog.SelectedPath = _projectBasePath;
+                }
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
                     PythonScriptPath = dialog.SelectedPath;
@@ -311,7 +376,7 @@ namespace SyncFiles.UI.ViewModels
             using (var dialog = new OpenFileDialog())
             {
                 dialog.Title = "Select Python Executable";
-                dialog.Filter = "Python Executable (python.exe, python)|python.exe;python|All files (*.*)|*.*";
+                dialog.Filter = "Python Executable (python.exe, pythonw.exe, python)|python.exe;pythonw.exe;python|All files (*.*)|*.*";
                 if (!string.IsNullOrEmpty(PythonExecutablePath) && File.Exists(PythonExecutablePath))
                 {
                     dialog.InitialDirectory = Path.GetDirectoryName(PythonExecutablePath);
@@ -324,40 +389,44 @@ namespace SyncFiles.UI.ViewModels
             }
         }
 
-        // You might want an IsModified property for the "Apply" button enable/disable logic
         public bool IsModified
         {
             get
             {
-                if (_originalSettings == null) return true; // If never loaded, assume modified
+                if (_originalSettings == null) return Mappings.Any() || WatchEntries.Any() || !string.IsNullOrEmpty(PythonScriptPath) || !string.IsNullOrEmpty(PythonExecutablePath) || EnvironmentVariables.Any();
 
                 var currentMappings = Mappings.Select(vm => vm.ToModel()).ToList();
                 if (!AreListsEqual(_originalSettings.Mappings, currentMappings, (m1, m2) => m1.Equals(m2))) return true;
 
-                var currentWatchEntries = WatchEntries.Select(vm => vm.ToModel()).ToList();
-                if (!AreListsEqual(_originalSettings.WatchEntries, currentWatchEntries, (w1, w2) => w1.Equals(w2))) return true;
+                var currentWatchEntryModels = WatchEntries.Select(vm => vm.ToModel()).ToList();
+                if (!AreListsEqual(_originalSettings.WatchEntries, currentWatchEntryModels, (w1, w2) => w1.WatchedPath == w2.WatchedPath && w1.OnEventScript == w2.OnEventScript)) return true;
+
 
                 if (_originalSettings.PythonScriptPath != (this.PythonScriptPath?.Trim() ?? string.Empty)) return true;
                 if (_originalSettings.PythonExecutablePath != (this.PythonExecutablePath?.Trim() ?? string.Empty)) return true;
 
-                var currentEnvVars = EnvironmentVariables.Select(vm => vm.ToModel()).ToList();
-                if (!AreListsEqual(_originalSettings.EnvironmentVariablesList, currentEnvVars,
+                var currentEnvVarsModels = EnvironmentVariables.Select(vm => vm.ToModel()).ToList();
+                if (!AreListsEqual(_originalSettings.EnvironmentVariablesList, currentEnvVarsModels,
                    (e1, e2) => e1.Name == e2.Name && e1.Value == e2.Value)) return true;
 
                 return false;
             }
         }
 
-        private bool AreListsEqual<T>(List<T> list1, List<T> list2, Func<T, T, bool> comparer)
+        private bool AreListsEqual<T>(List<T> list1, List<T> list2, Func<T, T, bool> itemComparer)
         {
             if (list1 == null && list2 == null) return true;
             if (list1 == null || list2 == null) return false;
             if (list1.Count != list2.Count) return false;
-            for (int i = 0; i < list1.Count; i++)
+
+            var tempList2 = new List<T>(list2);
+            foreach (T item1 in list1)
             {
-                if (!comparer(list1[i], list2[i])) return false;
+                T foundItem = tempList2.FirstOrDefault(item2 => itemComparer(item1, item2));
+                if (foundItem == null) return false;
+                tempList2.Remove(foundItem);
             }
-            return true;
+            return !tempList2.Any();
         }
     }
 }
