@@ -180,11 +180,29 @@ namespace SyncFiles.Core.Services
             }
             if (eventMatchesConfiguredPath)
             {
-                string eventTypeString = e.ChangeType.ToString(); // "Created", "Deleted", "Changed", "Renamed"
-                string affectedPathForScript = eventFullPath;
+                string eventTypeString;
+                switch (e.ChangeType)
+                {
+                    case WatcherChangeTypes.Created:
+                        eventTypeString = "Change New";
+                        break;
+                    case WatcherChangeTypes.Changed:
+                        eventTypeString = "Change Mod";
+                        break;
+                    case WatcherChangeTypes.Deleted:
+                        eventTypeString = "Change Del";
+                        break;
+                    case WatcherChangeTypes.Renamed:
+                        eventTypeString = "Change Del"; 
+                        break;
+                    default:
+                        eventTypeString = e.ChangeType.ToString(); // Fallback
+                        break;
+                }
+                string affectedPathForScript = e.FullPath.Replace(Path.DirectorySeparatorChar, '/');
                 if (e.ChangeType == WatcherChangeTypes.Deleted &&
-                   !eventFullPath.Equals(normalizedConfiguredWatchedPath, StringComparison.OrdinalIgnoreCase) &&
-                   normalizedConfiguredWatchedPath.StartsWith(eventFullPath + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    !Directory.Exists(e.FullPath) && File.Exists(configuredWatchedPath) &&
+                    Path.GetFullPath(configuredWatchedPath).StartsWith(Path.GetFullPath(Path.GetDirectoryName(e.FullPath) ?? string.Empty)))
                 {
                     affectedPathForScript = normalizedConfiguredWatchedPath;
                 }

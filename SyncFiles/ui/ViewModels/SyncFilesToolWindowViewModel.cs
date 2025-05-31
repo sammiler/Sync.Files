@@ -90,7 +90,6 @@ namespace SyncFiles.UI.ViewModels
                 }
             }
         }
-        public bool CurrentThemeIsDark => IsDarkTheme();
 
         private string _refreshIconPath;
         public string RefreshIconPath { get => _refreshIconPath; private set => SetProperty(ref _refreshIconPath, value); }
@@ -185,7 +184,8 @@ namespace SyncFiles.UI.ViewModels
 
             _assemblyName = GetType().Assembly.GetName().Name;
             UpdateIconsForTheme();
-            VSColorTheme.ThemeChanged += OnThemeChanged;
+            var themeService = ThemeService.Instance;
+
         }
         public async Task InitializeAsync(
             string projectBasePath,
@@ -205,6 +205,8 @@ namespace SyncFiles.UI.ViewModels
 
             await LoadAndRefreshScriptsAsync(true);
             // InitializePythonScriptWatcher(); // Called at the end of LoadAndRefreshScriptsAsync
+            UpdateIconsForTheme(); // **** Add this to ensure icons are set after initial load ****
+
             AppendLogMessage("SyncFiles Tool Window initialized.");
             IsBusy = false;
         }
@@ -216,7 +218,6 @@ namespace SyncFiles.UI.ViewModels
             Application.Current?.Dispatcher?.Invoke(() =>
             {
                 UpdateIconsForTheme();
-                OnPropertyChanged(nameof(CurrentThemeIsDark));
             });
         }
 
@@ -247,7 +248,7 @@ namespace SyncFiles.UI.ViewModels
                 return;
             }
 
-            bool isDark = IsDarkTheme();
+            bool isDark = ThemeService.Instance.IsDarkTheme;
 
             RefreshIconPath = $"/{_assemblyName};component/Resources/Refresh{(isDark ? "_dark" : "")}.png";
             AddGroupIconPath = $"/{_assemblyName};component/Resources/AddGroup{(isDark ? "_dark" : "")}.png";
@@ -706,163 +707,6 @@ namespace SyncFiles.UI.ViewModels
             }
         }
 
-        public string ShowInputDialog(string title, string prompt, string defaultValue = "", bool multiline = false)
-        {
-            var inputDialog = new System.Windows.Window
-            {
-                Title = title,
-                Width = 350,
-                MinWidth = 300,
-                SizeToContent = SizeToContent.Height,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                ShowInTaskbar = false,
-            };
-
-            Brush windowBackground = System.Windows.Media.Brushes.Transparent;
-            Brush windowForeground = System.Windows.Media.Brushes.Black;
-
-            if (Application.Current != null && Application.Current.Resources.Contains(VsBrushes.WindowKey))
-            {
-                windowBackground = (Brush)Application.Current.Resources[VsBrushes.WindowKey];
-                inputDialog.Background = windowBackground;
-            }
-            if (Application.Current != null && Application.Current.Resources.Contains(VsBrushes.WindowTextKey))
-            {
-                windowForeground = (Brush)Application.Current.Resources[VsBrushes.WindowTextKey];
-                inputDialog.Foreground = windowForeground;
-            }
-
-            if (Application.Current?.MainWindow?.IsVisible == true) inputDialog.Owner = Application.Current.MainWindow;
-
-            var panel = new StackPanel { Margin = new Thickness(15) };
-
-            var promptTextBlock = new TextBlock
-            {
-                Text = prompt,
-                Margin = new Thickness(0, 0, 0, 8),
-                Foreground = windowForeground
-            };
-            panel.Children.Add(promptTextBlock);
-
-            TextBox inputTextBox;
-            if (multiline)
-                inputTextBox = new TextBox
-                {
-                    Text = defaultValue,
-                    AcceptsReturn = true,
-                    TextWrapping = TextWrapping.Wrap,
-                    MinHeight = 70,
-                    MaxHeight = 150,
-                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                };
-            else
-                inputTextBox = new TextBox { Text = defaultValue };
-
-            if (Application.Current != null && Application.Current.Resources.Contains(VsResourceKeys.TextBoxStyleKey))
-                inputTextBox.Style = (Style)Application.Current.Resources[VsResourceKeys.TextBoxStyleKey];
-            else
-            {
-                inputTextBox.Foreground = windowForeground;
-            }
-
-            panel.Children.Add(inputTextBox);
-            inputDialog.Loaded += (s, e) => inputTextBox.Focus();
-
-
-            var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 15, 0, 0) };
-            var okButton = new Button { Content = "OK", IsDefault = true, MinWidth = 75, Margin = new Thickness(0, 0, 10, 0) };
-            var cancelButton = new Button { Content = "Cancel", IsCancel = true, MinWidth = 75 };
-
-            if (Application.Current != null && Application.Current.Resources.Contains(VsResourceKeys.ButtonStyleKey))
-            {
-                okButton.Style = (Style)Application.Current.Resources[VsResourceKeys.ButtonStyleKey];
-                cancelButton.Style = (Style)Application.Current.Resources[VsResourceKeys.ButtonStyleKey];
-            }
-
-            buttonPanel.Children.Add(okButton);
-            buttonPanel.Children.Add(cancelButton);
-            panel.Children.Add(buttonPanel);
-            inputDialog.Content = panel;
-
-            string result = null;
-            okButton.Click += (s, e) => { result = inputTextBox.Text; inputDialog.DialogResult = true; inputDialog.Close(); };
-            cancelButton.Click += (s, e) => { inputDialog.DialogResult = false; inputDialog.Close(); };
-
-            inputDialog.ShowDialog();
-            return (inputDialog.DialogResult == true) ? result : null;
-        }
-
-        public string ShowComboBoxDialog(string title, string prompt, List<string> items)
-        {
-            if (items == null || !items.Any()) return null;
-
-            var dialog = new System.Windows.Window
-            {
-                Title = title,
-                Width = 350,
-                MinWidth = 300,
-                SizeToContent = SizeToContent.Height,
-                WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                ShowInTaskbar = false,
-            };
-            Brush windowBackground = System.Windows.Media.Brushes.Transparent;
-            Brush windowForeground = System.Windows.Media.Brushes.Black;
-
-            if (Application.Current != null && Application.Current.Resources.Contains(VsBrushes.WindowKey))
-            {
-                windowBackground = (Brush)Application.Current.Resources[VsBrushes.WindowKey];
-                dialog.Background = windowBackground;
-            }
-            if (Application.Current != null && Application.Current.Resources.Contains(VsBrushes.WindowTextKey))
-            {
-                windowForeground = (Brush)Application.Current.Resources[VsBrushes.WindowTextKey];
-                dialog.Foreground = windowForeground;
-            }
-
-            if (Application.Current?.MainWindow?.IsVisible == true) dialog.Owner = Application.Current.MainWindow;
-
-            var panel = new StackPanel { Margin = new Thickness(15) };
-            var promptTextBlock = new TextBlock
-            {
-                Text = prompt,
-                Margin = new Thickness(0, 0, 0, 8),
-                Foreground = windowForeground
-            };
-            panel.Children.Add(promptTextBlock);
-
-            var comboBox = new ComboBox { ItemsSource = items, SelectedIndex = 0 };
-            if (Application.Current != null && Application.Current.Resources.Contains(VsResourceKeys.ComboBoxStyleKey))
-                comboBox.Style = (Style)Application.Current.Resources[VsResourceKeys.ComboBoxStyleKey];
-            else
-            {
-                comboBox.Foreground = windowForeground;
-            }
-
-            panel.Children.Add(comboBox);
-            dialog.Loaded += (s, e) => comboBox.Focus();
-
-
-            var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 15, 0, 0) };
-            var okButton = new Button { Content = "OK", IsDefault = true, MinWidth = 75, Margin = new Thickness(0, 0, 10, 0) };
-            var cancelButton = new Button { Content = "Cancel", IsCancel = true, MinWidth = 75 };
-            if (Application.Current != null && Application.Current.Resources.Contains(VsResourceKeys.ButtonStyleKey))
-            {
-                okButton.Style = (Style)Application.Current.Resources[VsResourceKeys.ButtonStyleKey];
-                cancelButton.Style = (Style)Application.Current.Resources[VsResourceKeys.ButtonStyleKey];
-            }
-            buttonPanel.Children.Add(okButton);
-            buttonPanel.Children.Add(cancelButton);
-            panel.Children.Add(buttonPanel);
-            dialog.Content = panel;
-
-            string result = null;
-            okButton.Click += (s, e) => { result = comboBox.SelectedItem as string; dialog.DialogResult = true; dialog.Close(); };
-            cancelButton.Click += (s, e) => { dialog.DialogResult = false; dialog.Close(); };
-
-            dialog.ShowDialog();
-            return (dialog.DialogResult == true) ? result : null;
-        }
-
         private async Task ShowMessageCoreAsync(string title, string message, OLEMSGICON icon)
         {
             if (_serviceProvider == null)
@@ -949,41 +793,52 @@ namespace SyncFiles.UI.ViewModels
                 updateAction();
             }
         }
-        private void OnWatchedFileChanged_Handler(string scriptToExecute, string eventType, string affectedFile)
+        private void OnWatchedFileChanged_Handler(string scriptToExecute, string eventType, string affectedPath)
         {
-            if (_settingsManager == null) return;
+            // 简要记录到主日志（如果需要）
+            string scriptFileName = Path.GetFileName(scriptToExecute);
+
+            if (_settingsManager == null)
+            {
+                AppendLogMessage($"[ERROR][{scriptFileName}] Settings manager not available.");
+                return;
+            }
             var settings = _settingsManager.LoadSettings(_projectBasePath);
             if (string.IsNullOrEmpty(settings.PythonExecutablePath) || !File.Exists(settings.PythonExecutablePath))
             {
-                AppendScriptError(Path.GetFileName(scriptToExecute), $"Python executable not configured or not found ('{settings.PythonExecutablePath}'). Cannot run script.");
+                AppendLogMessage($"[ERROR][{scriptFileName}] Python executable not configured or not found.");
                 return;
             }
             var executor = new ScriptExecutor(_projectBasePath);
-            var arguments = new List<string> { eventType, affectedFile };
+            var arguments = new List<string> { eventType, affectedPath };
 
-            AppendScriptOutput(Path.GetFileName(scriptToExecute), $"Event: {eventType} on '{affectedFile}'. Executing...");
+            // 不再将启动信息直接写入 ScriptOutputLog，而是写入主日志
+            // AppendScriptOutput(Path.GetFileName(scriptToExecute), $"Event: {eventType} on '{affectedPath}'. Executing...");
 
             System.Threading.Tasks.Task.Run(async () => {
                 try
                 {
+                    // 修改 ExecuteAndCaptureOutputAsync 的回调，使其记录到主日志或专门的日志文件，而不是 ScriptOutputLog
                     var result = await executor.ExecuteAndCaptureOutputAsync(
                         settings.PythonExecutablePath,
                         scriptToExecute,
                         arguments,
                         settings.EnvVariables,
-                        Path.GetDirectoryName(scriptToExecute),
-                        stdout => AppendScriptOutput(Path.GetFileName(scriptToExecute), stdout),
-                        stderr => AppendScriptError(Path.GetFileName(scriptToExecute), stderr)
+                        string.IsNullOrEmpty(settings.PythonScriptPath) ? _projectBasePath : settings.PythonScriptPath,
+                        // 对于文件监控脚本，stdout/stderr 可以考虑写入不同的地方，或者只记录摘要
+                        stdout => System.Diagnostics.Debug.WriteLine($"[WATCH_SCRIPT_STDOUT][{scriptFileName}]: {stdout}"),
+                        stderr => System.Diagnostics.Debug.WriteLine($"[WATCH_SCRIPT_STDERR][{scriptFileName}]: {stderr}")
                     );
-                    HandleScriptExecutionCompletion(Path.GetFileName(scriptToExecute), result);
                 }
                 catch (Exception exInner)
                 {
-                    AppendScriptError(Path.GetFileName(scriptToExecute), $"EXECUTION EXCEPTION (async): {exInner.Message}");
-                    HandleScriptExecutionCompletion(Path.GetFileName(scriptToExecute), null, exInner);
+                    System.Diagnostics.Debug.WriteLine($"[ERROR][WATCH_SCRIPT_EXEC][{scriptFileName}]: {exInner.ToString()}");
                 }
             });
         }
+
+        // AppendScriptOutput 和 AppendScriptError 现在只由用户通过UI执行脚本时调用
+        // (ScriptEntryViewModel.Execute -> _parentViewModel.AppendScriptOutput)
         private void GitHubSyncService_RegularSyncCompleted_Handler(object sender, EventArgs e)
         {
             AppendLogMessage("GitHub file synchronization completed.");
@@ -1252,7 +1107,131 @@ namespace SyncFiles.UI.ViewModels
                 return fullPath;
             }
         }
+        public string ShowInputDialog(string title, string prompt, string defaultValue = "", bool multiline = false)
+        {
+            var inputDialog = new System.Windows.Window
+            {
+                Title = title,
+                Width = 350,
+                MinWidth = 300,
+                SizeToContent = SizeToContent.Height,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ShowInTaskbar = false,
+            };
 
+            bool isDarkTheme = IsDarkTheme(); // Check current theme
+            Brush defaultWindowForeground = isDarkTheme ? System.Windows.Media.Brushes.White : (Brush)Application.Current.Resources[VsBrushes.WindowTextKey];
+            Brush defaultWindowBackground = (Brush)Application.Current.Resources[VsBrushes.WindowKey];
+
+            inputDialog.Background = defaultWindowBackground;
+            inputDialog.Foreground = defaultWindowForeground; // Set for the whole window
+
+            if (Application.Current?.MainWindow?.IsVisible == true) inputDialog.Owner = Application.Current.MainWindow;
+
+            var panel = new StackPanel { Margin = new Thickness(15) };
+
+            var promptTextBlock = new TextBlock
+            {
+                Text = prompt,
+                Margin = new Thickness(0, 0, 0, 8),
+                Foreground = defaultWindowForeground // Apply themed foreground
+            };
+            panel.Children.Add(promptTextBlock);
+
+            TextBox inputTextBox;
+            if (multiline)
+                inputTextBox = new TextBox { Text = defaultValue, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 70, MaxHeight = 150, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            else
+                inputTextBox = new TextBox { Text = defaultValue };
+
+            if (Application.Current != null && Application.Current.Resources.Contains(VsResourceKeys.TextBoxStyleKey))
+                inputTextBox.Style = (Style)Application.Current.Resources[VsResourceKeys.TextBoxStyleKey];
+
+            // Explicitly set TextBox foreground if not covered by style or for better control
+            inputTextBox.Foreground = defaultWindowForeground;
+            inputTextBox.Background = isDarkTheme ? (Brush)Application.Current.Resources[VsBrushes.ComboBoxBackgroundKey] : (Brush)Application.Current.Resources[VsBrushes.WindowKey];
+
+
+            panel.Children.Add(inputTextBox);
+            inputDialog.Loaded += (s, e) => inputTextBox.Focus();
+
+            var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 15, 0, 0) };
+            var okButton = new Button { Content = "OK", IsDefault = true, MinWidth = 75, Margin = new Thickness(0, 0, 10, 0) };
+            var cancelButton = new Button { Content = "Cancel", IsCancel = true, MinWidth = 75 };
+
+            if (Application.Current != null && Application.Current.Resources.Contains(VsResourceKeys.ButtonStyleKey))
+            {
+                okButton.Style = (Style)Application.Current.Resources[VsResourceKeys.ButtonStyleKey];
+                cancelButton.Style = (Style)Application.Current.Resources[VsResourceKeys.ButtonStyleKey];
+            }
+
+            buttonPanel.Children.Add(okButton);
+            buttonPanel.Children.Add(cancelButton);
+            panel.Children.Add(buttonPanel);
+            inputDialog.Content = panel;
+
+            string result = null;
+            okButton.Click += (s, e) => { result = inputTextBox.Text; inputDialog.DialogResult = true; inputDialog.Close(); };
+            cancelButton.Click += (s, e) => { inputDialog.DialogResult = false; inputDialog.Close(); };
+
+            inputDialog.ShowDialog();
+            return (inputDialog.DialogResult == true) ? result : null;
+        }
+        public string ShowComboBoxDialog(string title, string prompt, List<string> items)
+        {
+            if (items == null || !items.Any()) return null;
+
+            var dialog = new System.Windows.Window
+            {
+                Title = title,
+                Width = 350,
+                MinWidth = 300,
+                SizeToContent = SizeToContent.Height,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                ShowInTaskbar = false,
+            };
+            bool isDarkTheme = IsDarkTheme();
+            Brush defaultWindowForeground = isDarkTheme ? System.Windows.Media.Brushes.White : (Brush)Application.Current.Resources[VsBrushes.WindowTextKey];
+            Brush defaultWindowBackground = (Brush)Application.Current.Resources[VsBrushes.WindowKey];
+
+            dialog.Background = defaultWindowBackground;
+            dialog.Foreground = defaultWindowForeground;
+
+            if (Application.Current?.MainWindow?.IsVisible == true) dialog.Owner = Application.Current.MainWindow;
+
+            var panel = new StackPanel { Margin = new Thickness(15) };
+            var promptTextBlock = new TextBlock { Text = prompt, Margin = new Thickness(0, 0, 0, 8), Foreground = defaultWindowForeground };
+            panel.Children.Add(promptTextBlock);
+
+            var comboBox = new ComboBox { ItemsSource = items, SelectedIndex = 0 };
+            if (Application.Current != null && Application.Current.Resources.Contains(VsResourceKeys.ComboBoxStyleKey))
+                comboBox.Style = (Style)Application.Current.Resources[VsResourceKeys.ComboBoxStyleKey];
+
+            comboBox.Foreground = defaultWindowForeground; // Ensure ComboBox text is also themed
+
+            panel.Children.Add(comboBox);
+            dialog.Loaded += (s, e) => comboBox.Focus();
+
+            var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 15, 0, 0) };
+            var okButton = new Button { Content = "OK", IsDefault = true, MinWidth = 75, Margin = new Thickness(0, 0, 10, 0) };
+            var cancelButton = new Button { Content = "Cancel", IsCancel = true, MinWidth = 75 };
+            if (Application.Current != null && Application.Current.Resources.Contains(VsResourceKeys.ButtonStyleKey))
+            {
+                okButton.Style = (Style)Application.Current.Resources[VsResourceKeys.ButtonStyleKey];
+                cancelButton.Style = (Style)Application.Current.Resources[VsResourceKeys.ButtonStyleKey];
+            }
+            buttonPanel.Children.Add(okButton);
+            buttonPanel.Children.Add(cancelButton);
+            panel.Children.Add(buttonPanel);
+            dialog.Content = panel;
+
+            string result = null;
+            okButton.Click += (s, e) => { result = comboBox.SelectedItem as string; dialog.DialogResult = true; dialog.Close(); };
+            cancelButton.Click += (s, e) => { dialog.DialogResult = false; dialog.Close(); };
+
+            dialog.ShowDialog();
+            return (dialog.DialogResult == true) ? result : null;
+        }
         private void AddNewGroup()
         {
             int newGroupCounter = 1;
@@ -1490,7 +1469,7 @@ namespace SyncFiles.UI.ViewModels
             StopPythonScriptWatcher();
             DetachEventHandlers();
 
-            VSColorTheme.ThemeChanged -= OnThemeChanged;
+            ThemeService.Instance.UnsubscribeThemeChangedEvent();
 
             _workflowCts?.Dispose();
             if (LogMessages != null)

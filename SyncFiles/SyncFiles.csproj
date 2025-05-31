@@ -65,6 +65,7 @@
     <Compile Include="settings\SyncFilesSettingsState.cs" />
     <Compile Include="SyncFilesPackage.cs" />
     <Compile Include="ui\common\RelayCommand.cs" />
+    <Compile Include="ui\common\ThemeService.cs" />
     <Compile Include="ui\Configuration\SettingsWindow.xaml.cs">
       <DependentUpon>SettingsWindow.xaml</DependentUpon>
     </Compile>

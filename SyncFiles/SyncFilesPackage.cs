@@ -128,11 +128,6 @@ namespace SyncFiles
             if (_configWatcher != null)
             {
                 FileSystemWatcher watcherToStop = _configWatcher;
-                // _configWatcher is set to null by the caller (InitializeConfigWatcher or StopConfigWatcher)
-                // immediately after this call, still within the lock.
-                // Or, for absolute safety that this method itself doesn't rely on _configWatcher field after it's captured:
-                // _configWatcher = null; // if this method is the ONLY one setting the field to null.
-                // Given current InitializeConfigWatcher structure, it's better for Initialize to set it to null after this.
 
                 string pathForLog = "N/A";
                 try { pathForLog = watcherToStop.Path + Path.DirectorySeparatorChar + watcherToStop.Filter; } catch { }
