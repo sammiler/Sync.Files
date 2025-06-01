@@ -7,17 +7,345 @@
              xmlns:viewModels="clr-namespace:SyncFiles.UI.ViewModels"
              xmlns:shell="clr-namespace:Microsoft.VisualStudio.PlatformUI;assembly=Microsoft.VisualStudio.Shell.15.0"
              mc:Ignorable="d"
-             d:DesignHeight="600" d:DesignWidth="400" 
-             d:DataContext="{d:DesignInstance Type=viewModels:SyncFilesToolWindowViewModel, IsDesignTimeCreatable=True}"
-             Background="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
-             Foreground="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowTextBrushKey}}">
+             d:DesignHeight="600" d:DesignWidth="400">
 
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
-        <!-- 全局 MenuItem 样式已移除，以避免潜在的资源解析问题 -->
+
+        <!-- 1. 首先定义颜色资源 -->
+        <SolidColorBrush x:Key="DarkBackgroundBrush" Color="#2D2D2D"/>
+        <SolidColorBrush x:Key="DarkBorderBrush" Color="#404040"/>
+        <SolidColorBrush x:Key="DarkForegroundBrush" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="DarkDisabledBrush" Color="#808080"/>
+        <SolidColorBrush x:Key="DarkHoverBrush" Color="#3D3D3D"/>
+        <SolidColorBrush x:Key="DarkSelectedBrush" Color="#404040"/>
+
+        <!-- 2. 基础控件样式 -->
+        <!-- MenuItem样式 - 重写以移除选择框按钮 -->
+        <Style x:Key="DarkMenuItemStyle" TargetType="{x:Type MenuItem}">
+            <Setter Property="Background" Value="{StaticResource DarkBackgroundBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource DarkForegroundBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type MenuItem}">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                SnapsToDevicePixels="True">
+                            <Grid>
+                                <!-- 移除左侧选择框按钮，只保留内容区 -->
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto" SharedSizeGroup="MenuItemIGTColumnGroup"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- 菜单项主体内容 -->
+                                <ContentPresenter x:Name="ContentPresenter"
+                                                Grid.Column="0"
+                                                Margin="10,3,30,3"
+                                                ContentSource="Header"
+                                                RecognizesAccessKey="True"
+                                                SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+
+                                <!-- 子菜单箭头 -->
+                                <Path x:Name="SubMenuPath"
+                                      Grid.Column="1"
+                                      Margin="4,0,6,0"
+                                      VerticalAlignment="Center"
+                                      Fill="{TemplateBinding Foreground}"
+                                      Data="M0,0 L0,8 L4,4 Z"
+                                      Visibility="Collapsed"/>
+
+                                <!-- 子菜单弹出项 -->
+                                <Popup x:Name="SubMenuPopup"
+                                       Placement="Right"
+                                       HorizontalOffset="-1"
+                                       VerticalOffset="-3"
+                                       IsOpen="{TemplateBinding IsSubmenuOpen}"
+                                       AllowsTransparency="True"
+                                       Focusable="False"
+                                       PopupAnimation="Fade">
+                                    <Border x:Name="SubMenuBorder"
+                                            Background="{StaticResource DarkBackgroundBrush}"
+                                            BorderBrush="{StaticResource DarkBorderBrush}"
+                                            BorderThickness="1">
+                                        <ScrollViewer Style="{DynamicResource {ComponentResourceKey ResourceId=MenuScrollViewer, TypeInTargetAssembly={x:Type FrameworkElement}}}">
+                                            <ItemsPresenter x:Name="ItemsPresenter"/>
+                                        </ScrollViewer>
+                                    </Border>
+                                </Popup>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <!-- 鼠标悬停效果 -->
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" TargetName="Bd" Value="{StaticResource DarkHoverBrush}"/>
+                            </Trigger>
+                            
+                            <!-- 禁用状态效果 -->
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{StaticResource DarkDisabledBrush}"/>
+                            </Trigger>
+
+                            <!-- 显示子菜单箭头 -->
+                            <Trigger Property="HasItems" Value="True">
+                                <Setter Property="Visibility" TargetName="SubMenuPath" Value="Visible"/>
+                            </Trigger>
+
+                            <!-- 选中状态 -->
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter Property="Background" TargetName="Bd" Value="{StaticResource DarkSelectedBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 3. ContextMenu样式 - 依赖于MenuItem样式 -->
+        <Style x:Key="DarkContextMenuStyle" TargetType="{x:Type ContextMenu}">
+            <Setter Property="Background" Value="{StaticResource DarkBackgroundBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource DarkBorderBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ContextMenu}">
+                        <Border x:Name="Border"
+                                Background="{StaticResource DarkBackgroundBrush}"
+                                BorderBrush="{StaticResource DarkBorderBrush}"
+                                BorderThickness="1">
+                            <ScrollViewer x:Name="ScrollViewer" 
+                                        Style="{DynamicResource {ComponentResourceKey ResourceId=MenuScrollViewer, TypeInTargetAssembly={x:Type FrameworkElement}}}">
+                                <ItemsPresenter x:Name="ItemsPresenter"
+                                              KeyboardNavigation.DirectionalNavigation="Cycle"
+                                              Grid.IsSharedSizeScope="True"/>
+                            </ScrollViewer>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="{x:Type MenuItem}">
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="{x:Type MenuItem}">
+                                    <Border x:Name="Border"
+                                            Background="{StaticResource DarkBackgroundBrush}">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" SharedSizeGroup="Icon"/>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="Auto" SharedSizeGroup="Shortcut"/>
+                                                <ColumnDefinition Width="13"/>
+                                            </Grid.ColumnDefinitions>
+
+                                            <!-- 图标区域 -->
+                                            <Border x:Name="IconBorder" 
+                                                    Width="32" 
+                                                    Background="{StaticResource DarkBackgroundBrush}">
+                                                <ContentPresenter x:Name="Icon" 
+                                                                VerticalAlignment="Center"
+                                                                ContentSource="Icon"
+                                                                SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                                            </Border>
+
+                                            <!-- 标题区域 -->
+                                            <ContentPresenter x:Name="HeaderHost"
+                                                            Grid.Column="1"
+                                                            ContentSource="Header"
+                                                            RecognizesAccessKey="True"
+                                                            Margin="5,3,5,3"
+                                                            VerticalAlignment="Center"/>
+
+                                            <!-- 子菜单箭头 -->
+                                            <Grid x:Name="ArrowPanel" 
+                                                  Grid.Column="3" 
+                                                  Visibility="Collapsed"
+                                                  Margin="4,0,0,0" 
+                                                  VerticalAlignment="Center">
+                                                <Path x:Name="ArrowPanelPath"
+                                                      HorizontalAlignment="Right"
+                                                      Fill="{TemplateBinding Foreground}"
+                                                      Data="M0,0 L0,8 L4,4 Z"/>
+                                            </Grid>
+
+                                            <!-- 子菜单弹出 -->
+                                            <Popup x:Name="SubMenuPopup"
+                                                   Placement="Right"
+                                                   HorizontalOffset="-1"
+                                                   IsOpen="{TemplateBinding IsSubmenuOpen}"
+                                                   AllowsTransparency="True"
+                                                   Focusable="False"
+                                                   PopupAnimation="Fade">
+                                                <Border x:Name="SubMenuBorder"
+                                                        Background="{StaticResource DarkBackgroundBrush}"
+                                                        BorderBrush="{StaticResource DarkBorderBrush}"
+                                                        BorderThickness="1">
+                                                    <ScrollViewer CanContentScroll="True"
+                                                                Style="{DynamicResource {ComponentResourceKey ResourceId=MenuScrollViewer, TypeInTargetAssembly={x:Type FrameworkElement}}}">
+                                                        <ItemsPresenter x:Name="ItemsPresenter"/>
+                                                    </ScrollViewer>
+                                                </Border>
+                                            </Popup>
+                                        </Grid>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsHighlighted" Value="true">
+                                            <Setter Property="Background" TargetName="Border" Value="{StaticResource DarkHoverBrush}"/>
+                                        </Trigger>
+                                        <Trigger Property="IsEnabled" Value="False">
+                                            <Setter Property="Foreground" Value="{StaticResource DarkDisabledBrush}"/>
+                                        </Trigger>
+                                        <Trigger Property="HasItems" Value="True">
+                                            <Setter TargetName="ArrowPanel" Property="Visibility" Value="Visible"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Separator样式 -->
+        <Style x:Key="DarkSeparatorStyle" TargetType="{x:Type Separator}">
+            <Setter Property="Background" Value="{StaticResource DarkBorderBrush}"/>
+            <Setter Property="Margin" Value="0,2"/>
+            <Setter Property="Height" Value="1"/>
+        </Style>
+
+        <!-- 4. 展开按钮样式 -->
+        <Style x:Key="ExpandCollapseToggleStyle" TargetType="{x:Type ToggleButton}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ToggleButton}">
+                        <Border Width="16" Height="16" Background="Transparent">
+                            <Path x:Name="arrow" 
+                                  Fill="{StaticResource DarkForegroundBrush}"
+                                  Data="M 0 0 L 4 4 L 0 8 Z"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="arrow" Property="Data" 
+                                        Value="M 0 0 L 8 0 L 4 4 Z"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 5. TreeViewItem样式 - 最后定义，因为它依赖于其他所有样式 -->
+        <Style x:Key="CustomTreeViewItemStyle" TargetType="{x:Type TreeViewItem}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource DarkForegroundBrush}"/>
+            <EventSetter Event="MouseDoubleClick" Handler="TreeViewItem_MouseDoubleClick"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type TreeViewItem}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition/>
+                            </Grid.RowDefinitions>
+                            
+                            <ToggleButton x:Name="Expander"
+                                        ClickMode="Press"
+                                        IsChecked="{Binding Path=IsExpanded, RelativeSource={RelativeSource TemplatedParent}}"
+                                        Style="{StaticResource ExpandCollapseToggleStyle}"
+                                        Width="16" Height="16"
+                                        Visibility="{Binding HasItems, RelativeSource={RelativeSource AncestorType=TreeViewItem}, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+
+                            <Border x:Name="Bd" Grid.Column="1"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter x:Name="PART_Header"
+                                                ContentSource="Header"
+                                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
+                            </Border>
+                            
+                            <ItemsPresenter x:Name="ItemsHost" Grid.Row="1" Grid.Column="1" Margin="16,0,0,0"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="False">
+                                <Setter Property="Visibility" TargetName="ItemsHost" Value="Collapsed"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" TargetName="Bd" Value="{StaticResource DarkSelectedBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="ContextMenu">
+                <Setter.Value>
+                    <ContextMenu Style="{StaticResource DarkContextMenuStyle}"
+                                 DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                        <!-- 脚本项的菜单 -->
+                        <MenuItem Header="执行" Command="{Binding ExecuteCommand}"
+                                  Style="{StaticResource DarkMenuItemStyle}"
+                                  IsEnabled="{Binding CanExecuteScript}"
+                                  Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        <MenuItem Header="打开文件" Command="{Binding OpenScriptFileCommand}"
+                                  Style="{StaticResource DarkMenuItemStyle}"
+                                  IsEnabled="{Binding CanExecuteScript}"
+                                  Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        <Separator Style="{StaticResource DarkSeparatorStyle}" Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        <MenuItem Header="设置执行模式" 
+                                  Style="{StaticResource DarkMenuItemStyle}"
+                                  IsEnabled="{Binding CanExecuteScript}"
+                                  Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <MenuItem Header="在终端运行" Command="{Binding SetExecutionModeToTerminalCommand}"
+                                      Style="{StaticResource DarkMenuItemStyle}"
+                                      IsChecked="{Binding IsExecutionModeTerminal, Mode=OneWay}"/>
+                            <MenuItem Header="运行并捕获输出" Command="{Binding SetExecutionModeToDirectApiCommand}"
+                                      Style="{StaticResource DarkMenuItemStyle}"
+                                      IsChecked="{Binding IsExecutionModeDirectApi, Mode=OneWay}"/>
+                        </MenuItem>
+                        <Separator Style="{StaticResource DarkSeparatorStyle}" Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        <MenuItem Header="设置别名..." Command="{Binding SetAliasCommand}"
+                                  Style="{StaticResource DarkMenuItemStyle}"
+                                  IsEnabled="{Binding CanExecuteScript}"
+                                  Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        <MenuItem Header="设置描述..." Command="{Binding SetDescriptionCommand}"
+                                  Style="{StaticResource DarkMenuItemStyle}"
+                                  IsEnabled="{Binding CanExecuteScript}"
+                                  Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        <Separator Style="{StaticResource DarkSeparatorStyle}" Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        <MenuItem Header="移动到组..." Command="{Binding MoveToGroupCommand}"
+                                  Style="{StaticResource DarkMenuItemStyle}"
+                                  IsEnabled="{Binding CanExecuteScript}"
+                                  Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        <MenuItem Header="从此组移除" Command="{Binding RemoveFromGroupCommand}"
+                                  Style="{StaticResource DarkMenuItemStyle}"
+                                  IsEnabled="{Binding CanExecuteScript}"
+                                  Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        
+                        <!-- 组的菜单项 -->
+                        <MenuItem Header="重命名组" Command="{Binding RenameGroupCommand}"
+                                  Style="{StaticResource DarkMenuItemStyle}"
+                                  Visibility="{Binding IsScriptGroupAndNotDefault, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        <MenuItem Header="删除组" Command="{Binding DeleteGroupCommand}"
+                                  Style="{StaticResource DarkMenuItemStyle}"
+                                  Visibility="{Binding IsScriptGroupAndNotDefault, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                    </ContextMenu>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
 
-    <Grid>
+    <!-- 设置根Grid的背景色 -->
+    <Grid Background="{StaticResource DarkBackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -26,8 +354,7 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <ToolBar Grid.Row="0" Height="Auto" Padding="2"
-                 Background="{DynamicResource {x:Static shell:EnvironmentColors.CommandBarGradientBeginBrushKey}}">
+        <ToolBar Grid.Row="0" Height="Auto" Padding="2" Background="{StaticResource DarkBackgroundBrush}">
             <Button Command="{Binding RefreshScriptsCommand}" ToolTip="刷新脚本、工作区和设置" Padding="3" Margin="1" Background="Transparent">
                 <Image Source="{Binding RefreshIconPath}" Width="16" Height="16" Stretch="Uniform"/>
             </Button>
@@ -47,67 +374,25 @@
                   ItemsSource="{Binding ScriptGroups}"
                   Background="Transparent"
                   BorderThickness="0,1,0,0"
-                  BorderBrush="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                  BorderBrush="{StaticResource DarkBorderBrush}"
+                  ItemContainerStyle="{StaticResource CustomTreeViewItemStyle}"
                   ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                   ScrollViewer.VerticalScrollBarVisibility="Auto">
-
-            <TreeView.ItemContainerStyle>
-                <Style TargetType="{x:Type TreeViewItem}" BasedOn="{StaticResource {x:Type TreeViewItem}}">
-                    <Setter Property="Focusable" Value="True"/>
-                    <EventSetter Event="MouseDoubleClick" Handler="TreeViewItem_MouseDoubleClick"/>
-                    <Setter Property="ContextMenu">
-                        <Setter.Value>
-                            <!-- ContextMenu本身使用VS默认主题样式 -->
-                            <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
-                                <!-- MenuItem 将使用其默认样式或从 ContextMenu 继承的样式 -->
-                                <MenuItem Header="执行" Command="{Binding ExecuteCommand}" IsEnabled="{Binding CanExecuteScript}"
-                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="打开文件" Command="{Binding OpenScriptFileCommand}" IsEnabled="{Binding CanExecuteScript}"
-                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <Separator Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="设置执行模式" IsEnabled="{Binding CanExecuteScript}"
-                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                    <MenuItem Header="在终端运行" Command="{Binding SetExecutionModeToTerminalCommand}"
-                                              IsChecked="{Binding IsExecutionModeTerminal, Mode=OneWay}"/>
-                                    <MenuItem Header="运行并捕获输出" Command="{Binding SetExecutionModeToDirectApiCommand}"
-                                              IsChecked="{Binding IsExecutionModeDirectApi, Mode=OneWay}"/>
-                                </MenuItem>
-                                <Separator Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="设置别名..." Command="{Binding SetAliasCommand}" IsEnabled="{Binding CanExecuteScript}"
-                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="设置描述..." Command="{Binding SetDescriptionCommand}" IsEnabled="{Binding CanExecuteScript}"
-                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <Separator Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="移动到组..." Command="{Binding MoveToGroupCommand}" IsEnabled="{Binding CanExecuteScript}"
-                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="从此组移除" Command="{Binding RemoveFromGroupCommand}" IsEnabled="{Binding CanExecuteScript}"
-                                          Visibility="{Binding IsScriptEntry, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="重命名组" Command="{Binding RenameGroupCommand}"
-                                          Visibility="{Binding IsScriptGroupAndNotDefault, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                                <MenuItem Header="删除组" Command="{Binding DeleteGroupCommand}"
-                                          Visibility="{Binding IsScriptGroupAndNotDefault, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                            </ContextMenu>
-                        </Setter.Value>
-                    </Setter>
-                </Style>
-            </TreeView.ItemContainerStyle>
 
             <TreeView.Resources>
                 <HierarchicalDataTemplate DataType="{x:Type viewModels:ScriptGroupViewModel}"
                                           ItemsSource="{Binding Scripts}">
                     <StackPanel Orientation="Horizontal">
                         <Image Source="{Binding FolderIconPath}" Width="16" Height="16" Margin="0,0,5,0" VerticalAlignment="Center" Stretch="Uniform"/>
-                        <TextBlock Text="{Binding Name}" ToolTip="{Binding Name}" VerticalAlignment="Center"
-                                   Foreground="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowTextBrushKey}}"/>
+                        <TextBlock Text="{Binding Name}" ToolTip="{Binding Name}" VerticalAlignment="Center" Foreground="{StaticResource DarkForegroundBrush}"/>
                     </StackPanel>
                 </HierarchicalDataTemplate>
 
                 <DataTemplate DataType="{x:Type viewModels:ScriptEntryViewModel}">
                     <StackPanel Orientation="Horizontal" ToolTip="{Binding PathAndMissingToolTipText}">
-                        <Image Width="16" Height="16" Margin="0,0,5,0" VerticalAlignment="Center">
+                        <Image Width="16" Height="16" Margin="0,0,5,0" VerticalAlignment="Center" Source="{Binding NormalScriptIconPath}">
                             <Image.Style>
                                 <Style TargetType="{x:Type Image}">
-                                    <Setter Property="Source" Value="{Binding NormalScriptIconPath}"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsMissing}" Value="True">
                                             <Setter Property="Source" Value="{Binding WarningScriptIconPath}"/>
@@ -116,10 +401,9 @@
                                 </Style>
                             </Image.Style>
                         </Image>
-                        <TextBlock Text="{Binding DisplayNameWithStatus}" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding DisplayNameWithStatus}" VerticalAlignment="Center" Foreground="{StaticResource DarkForegroundBrush}">
                             <TextBlock.Style>
                                 <Style TargetType="{x:Type TextBlock}">
-                                    <Setter Property="Foreground" Value="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowTextBrushKey}}"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsMissing}" Value="True">
                                             <Setter Property="Foreground" Value="Red"/>
@@ -134,11 +418,12 @@
         </TreeView>
 
         <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                      Background="{DynamicResource {x:Static shell:EnvironmentColors.CommandBarBorderBrushKey}}"
+                      Background="{StaticResource DarkBorderBrush}"
                       ShowsPreview="True"
                       Visibility="{Binding IsScriptOutputVisible, Converter={StaticResource BooleanToVisibilityConverter}}"/>
 
         <Grid Grid.Row="3"
+              Background="{StaticResource DarkBackgroundBrush}"
               Visibility="{Binding IsScriptOutputVisible, Converter={StaticResource BooleanToVisibilityConverter}}"
               MinHeight="100" MaxHeight="300">
             <Grid.RowDefinitions>
@@ -146,16 +431,16 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <ToolBar Grid.Row="0" Padding="2" Background="{DynamicResource {x:Static shell:EnvironmentColors.CommandBarGradientBeginBrushKey}}">
-                <TextBlock Text="脚本输出" Margin="5,0" VerticalAlignment="Center" Foreground="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowTextBrushKey}}"/>
+            <ToolBar Grid.Row="0" Padding="2" Background="{StaticResource DarkBackgroundBrush}">
+                <TextBlock Text="脚本输出" Margin="5,0" VerticalAlignment="Center" Foreground="White"/>
                 <Button Command="{Binding ClearScriptOutputCommand}" ToolTip="清除输出" Padding="3" Margin="1" Background="Transparent">
                     <TextBlock Text="🗑️" FontSize="14" VerticalAlignment="Center"/>
                 </Button>
             </ToolBar>
 
             <ListBox Grid.Row="1" ItemsSource="{Binding ScriptOutputLog}"
-                     Background="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowBackgroundBrushKey}}"
-                     BorderBrush="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowBorderBrushKey}}"
+                     Background="{StaticResource DarkBackgroundBrush}"
+                     BorderBrush="{StaticResource DarkBorderBrush}"
                      BorderThickness="0,1,0,0"
                      HorizontalContentAlignment="Stretch"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -165,7 +450,7 @@
                         <TextBlock Text="{Binding DisplayLine}" TextWrapping="Wrap">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
-                                    <Setter Property="Foreground" Value="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowTextBrushKey}}"/>
+                                    <Setter Property="Foreground" Value="White"/>
                                     <Style.Triggers>
                                         <DataTrigger Binding="{Binding IsError}" Value="True">
                                             <Setter Property="Foreground" Value="Red"/>
@@ -179,16 +464,16 @@
             </ListBox>
         </Grid>
 
-        <StatusBar Grid.Row="4" Background="{DynamicResource {x:Static shell:EnvironmentColors.StatusBarDefaultBrushKey}}">
+        <StatusBar Grid.Row="4" Background="{StaticResource DarkBackgroundBrush}">
             <StatusBarItem>
                 <TextBlock Text="{Binding StatusMessage}"
-                           Foreground="{DynamicResource {x:Static shell:EnvironmentColors.StatusBarTextBrushKey}}"
+                           Foreground="{StaticResource DarkForegroundBrush}"
                            Margin="3,0"/>
             </StatusBarItem>
             <StatusBarItem HorizontalAlignment="Right" Visibility="{Binding IsBusy, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <ProgressBar IsIndeterminate="True" Width="100" Height="10" Margin="3,0"
-                              Background="{DynamicResource {x:Static shell:EnvironmentColors.StatusBarNoSolutionBrushKey}}"
-                              BorderBrush="{DynamicResource {x:Static shell:EnvironmentColors.StatusBarHighlightBrushKey}}"/>
+                              Background="{StaticResource DarkBackgroundBrush}"
+                              BorderBrush="{StaticResource DarkBorderBrush}"/>
             </StatusBarItem>
         </StatusBar>
     </Grid>
