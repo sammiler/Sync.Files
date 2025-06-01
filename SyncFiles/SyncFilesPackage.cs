@@ -37,41 +37,116 @@ namespace SyncFiles
         private SmartWorkflowService _smartWorkflowService;
         private FileSystemWatcher _configWatcher;
 
+        private System.Threading.Timer _windowCheckTimer;
+        private readonly object _timerLock = new object();
+        private bool _isTimerRunning = false;
 
         private readonly object _serviceLock = new object();
         private readonly object _configWatcherLock = new object();
         private CancellationTokenSource _configChangedDebounceCts;
 
-
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
-            await base.InitializeAsync(cancellationToken, progress);
-            await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+            try
+            {
+                await base.InitializeAsync(cancellationToken, progress);
+                await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
 
-            System.Diagnostics.Debug.WriteLine("[INFO] [PACKAGE_INIT] Initializing SyncFilesPackage core components...");
+                System.Diagnostics.Debug.WriteLine("[INFO] [PACKAGE_INIT] Initializing SyncFilesPackage core components...");
 
-            _settingsManager = new SyncFilesSettingsManager();
+                _settingsManager = new SyncFilesSettingsManager();
 
-            _gitHubSyncService = new GitHubSyncService(null);
-            _fileSystemWatcherService = new FileSystemWatcherService(null);
-            _smartWorkflowService = new SmartWorkflowService(null, _settingsManager, _gitHubSyncService);
+                _gitHubSyncService = new GitHubSyncService(null);
+                _fileSystemWatcherService = new FileSystemWatcherService(null);
+                _smartWorkflowService = new SmartWorkflowService(null, _settingsManager, _gitHubSyncService);
 
-            ToolWindowViewModel = new SyncFilesToolWindowViewModel(this);
-            await ToolWindowViewModel.InitializeAsync(
-                null,
-                _settingsManager,
-                _gitHubSyncService,
-                _fileSystemWatcherService,
-                _smartWorkflowService
-            );
+                ToolWindowViewModel = new SyncFilesToolWindowViewModel(this);
+                await ToolWindowViewModel.InitializeAsync(
+                    null,
+                    _settingsManager,
+                    _gitHubSyncService,
+                    _fileSystemWatcherService,
+                    _smartWorkflowService
+                );
 
-            await ShowToolWindowCommand.InitializeAsync(this);
-            await ShowSettingsWindowCommand.InitializeAsync(this, _settingsManager);
+                await ShowToolWindowCommand.InitializeAsync(this);
+                await ShowSettingsWindowCommand.InitializeAsync(this, _settingsManager);
 
-            await EnsureProjectSpecificServicesAsync();
-            InitializeConfigWatcher();
+                await EnsureProjectSpecificServicesAsync();
+                InitializeConfigWatcher();
 
-            System.Diagnostics.Debug.WriteLine("[INFO] [PACKAGE_INIT] SyncFilesPackage initialized successfully.");
+                StartWindowCheckTimer();
+
+                System.Diagnostics.Debug.WriteLine("[INFO] [PACKAGE_INIT] SyncFilesPackage initialized successfully.");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ERROR] [PACKAGE_INIT] Initialization failed: {ex}");
+            }
+        }
+
+        private void StartWindowCheckTimer()
+        {
+            lock (_timerLock)
+            {
+                if (!_isTimerRunning)
+                {
+                    _windowCheckTimer = new System.Threading.Timer(
+                        CheckAndCloseWindowCallback,
+                        null,
+                        TimeSpan.FromSeconds(1), // 1秒后开始
+                        TimeSpan.FromSeconds(1)  // 每秒检查一次
+                    );
+                    _isTimerRunning = true;
+                    System.Diagnostics.Debug.WriteLine("[INFO] Window check timer started");
+                }
+            }
+        }
+
+        private void StopWindowCheckTimer()
+        {
+            lock (_timerLock)
+            {
+                if (_isTimerRunning)
+                {
+                    _windowCheckTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+                    _windowCheckTimer?.Dispose();
+                    _windowCheckTimer = null;
+                    _isTimerRunning = false;
+                    System.Diagnostics.Debug.WriteLine("[INFO] Window check timer stopped");
+                }
+            }
+        }
+
+        private async void CheckAndCloseWindowCallback(object state)
+        {
+            try
+            {
+                await JoinableTaskFactory.SwitchToMainThreadAsync();
+
+                var window = await FindToolWindowAsync(typeof(SyncFilesToolWindow), 0, false, DisposalToken);
+                if (window?.Frame != null)
+                {
+                    IVsWindowFrame windowFrame = (IVsWindowFrame)window.Frame;
+
+                    // 使用 VSFPROPID_WindowState 检查窗口状态
+                    Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(
+                        windowFrame.GetProperty((int)__VSFPROPID.VSFPROPID_WindowState, out object windowState));
+                    if (windowState is int windowStateValue && windowStateValue == 0) // 1 表示窗口可见
+                    {
+                        // 窗口可见，关闭它
+                        Microsoft.VisualStudio.ErrorHandler.ThrowOnFailure(windowFrame.Hide());
+                        System.Diagnostics.Debug.WriteLine("[INFO] Tool window was found and closed");
+
+                        // 停止定时器
+                        StopWindowCheckTimer();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ERROR] Error in window check timer: {ex.Message}");
+            }
         }
 
         public void TriggerReinitializeConfigWatcher()
@@ -313,6 +388,7 @@ namespace SyncFiles
         {
             if (disposing)
             {
+                StopWindowCheckTimer();
                 _configChangedDebounceCts?.Cancel();
                 _configChangedDebounceCts?.Dispose();
                 StopConfigWatcher();
