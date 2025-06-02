@@ -1481,6 +1481,38 @@ namespace SyncFiles.UI.ViewModels
             }
             System.Diagnostics.Debug.WriteLine("SyncFilesToolWindowViewModel Disposed.");
         }
+
+        public string GetPythonExecutablePath()
+        {
+            return _settingsManager?.LoadSettings(_projectBasePath)?.PythonExecutablePath ?? "python";
+        }
+
+        public string GetPythonScriptBasePath()
+        {
+            return _settingsManager?.LoadSettings(_projectBasePath)?.PythonScriptPath;
+        }
+
+        public Dictionary<string, string> GetEnvironmentVariables()
+        {
+            var settings = _settingsManager?.LoadSettings(_projectBasePath);
+            if (settings == null) return new Dictionary<string, string>();
+            
+            Dictionary<string, string> envVars = new Dictionary<string, string>();
+            
+            if (settings.EnvironmentVariablesList != null)
+            {
+                foreach (var envVar in settings.EnvironmentVariablesList)
+                {
+                    envVars[envVar.Name] = envVar.Value;
+                }
+            }
+            
+            // 添加必要的Python环境变量
+            envVars["PYTHONUNBUFFERED"] = "1";
+            envVars["PYTHONIOENCODING"] = "UTF-8";
+            
+            return envVars;
+        }
     }
 }
 public static class ScriptEntryViewModelExtensions

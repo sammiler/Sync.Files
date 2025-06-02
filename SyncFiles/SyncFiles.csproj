@@ -69,6 +69,9 @@
     <Compile Include="ui\Configuration\SettingsWindow.xaml.cs">
       <DependentUpon>SettingsWindow.xaml</DependentUpon>
     </Compile>
+    <Compile Include="ui\Controls\PtyTerminalControl.xaml.cs">
+      <DependentUpon>PtyTerminalControl.xaml</DependentUpon>
+    </Compile>
     <Compile Include="ui\ToolWindows\SyncFilesToolWindow.cs" />
     <Compile Include="ui\ToolWindows\SyncFilesToolWindowControl.xaml.cs">
       <DependentUpon>SyncFilesToolWindowControl.xaml</DependentUpon>
@@ -132,6 +135,9 @@
   <ItemGroup>
     <Page Include="ui\Configuration\SettingsWindow.xaml">
       <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="ui\Controls\PtyTerminalControl.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="ui\ToolWindows\SyncFilesToolWindowControl.xaml">

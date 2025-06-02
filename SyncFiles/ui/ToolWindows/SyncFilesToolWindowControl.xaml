@@ -6,6 +6,7 @@
              xmlns:local="clr-namespace:SyncFiles.UI.ToolWindows"
              xmlns:viewModels="clr-namespace:SyncFiles.UI.ViewModels"
              xmlns:shell="clr-namespace:Microsoft.VisualStudio.PlatformUI;assembly=Microsoft.VisualStudio.Shell.15.0"
+             xmlns:controls="clr-namespace:SyncFiles.UI.Controls"
              mc:Ignorable="d"
              d:DesignHeight="600" d:DesignWidth="400">
 
@@ -352,6 +353,8 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <ToolBar Grid.Row="0" Height="Auto" Padding="2" Background="{StaticResource DarkBackgroundBrush}">
@@ -464,7 +467,30 @@
             </ListBox>
         </Grid>
 
-        <StatusBar Grid.Row="4" Background="{StaticResource DarkBackgroundBrush}">
+        <GridSplitter Grid.Row="4" Height="5" HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                      Background="{StaticResource DarkBorderBrush}"
+                      ShowsPreview="True"/>
+
+        <Grid Grid.Row="5" Background="{StaticResource DarkBackgroundBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <ToolBar Grid.Row="0" Padding="2" Background="{StaticResource DarkBackgroundBrush}">
+                <TextBlock Text="嵌入式终端" Margin="5,0" VerticalAlignment="Center" Foreground="{StaticResource DarkForegroundBrush}"/>
+                <Button Click="ClearTerminal_Click" ToolTip="清除终端" Padding="3" Margin="1" Background="Transparent">
+                    <TextBlock Text="清除" Foreground="{StaticResource DarkForegroundBrush}"/>
+                </Button>
+                <Button Click="StopProcess_Click" ToolTip="终止当前进程" Padding="3" Margin="1" Background="Transparent">
+                    <TextBlock Text="终止进程" Foreground="{StaticResource DarkForegroundBrush}"/>
+                </Button>
+            </ToolBar>
+
+            <controls:PtyTerminalControl x:Name="terminalControl" Grid.Row="1"/>
+        </Grid>
+
+        <StatusBar Grid.Row="6" Background="{StaticResource DarkBackgroundBrush}">
             <StatusBarItem>
                 <TextBlock Text="{Binding StatusMessage}"
                            Foreground="{StaticResource DarkForegroundBrush}"
