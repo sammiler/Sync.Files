@@ -1,6 +1,7 @@
 ﻿using SyncFiles.Core.Models; // For ScriptEntry model
 using SyncFiles.Core.Services;
 using SyncFiles.UI.Common;
+using SyncFiles.UI.ToolWindows;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -8,6 +9,7 @@ using System.IO;
 using System.Linq;
 using System.Text; // For StringBuilder
 using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Input; // For ICommand 
 
 namespace SyncFiles.UI.ViewModels
@@ -190,7 +192,7 @@ namespace SyncFiles.UI.ViewModels
         {
             if (!CanExecuteScript)
             {
-                _parentViewModel?.SetScriptExecutionStatus($"Cannot execute: {DisplayName} (missing or other condition).");
+                _parentViewModel?.SetScriptExecutionStatus($"无法执行: {DisplayName} (文件不存在或其他条件)");
                 return;
             }
 
@@ -198,64 +200,47 @@ namespace SyncFiles.UI.ViewModels
             if (string.IsNullOrEmpty(Path) || !File.Exists(fullScriptPath))
             {
                 IsMissing = true;
-                _parentViewModel?.SetScriptExecutionStatus($"ERROR: Script file not found for {DisplayName}: {fullScriptPath}");
+                _parentViewModel?.SetScriptExecutionStatus($"错误: 找不到脚本文件 {DisplayName}: {fullScriptPath}");
                 System.Diagnostics.Debug.WriteLine($"[ERROR] Script file not found: {fullScriptPath}");
                 return;
             }
 
             var executor = new Core.Services.ScriptExecutor(_projectBasePath);
-            var arguments = new List<string>();
+            // 确保使用正确的arguments变量
+            var args = new List<string>();
 
             if (ExecutionMode.Equals("terminal", StringComparison.OrdinalIgnoreCase))
             {
-                _parentViewModel?.SetScriptExecutionStatus($"Launching in terminal: {DisplayName}...");
+                // 外部终端模式保持不变
+                _parentViewModel?.SetScriptExecutionStatus($"正在启动终端: {DisplayName}...");
                 try
                 {
                     executor.LaunchInExternalTerminal(
                         _pythonExecutablePath,
                         fullScriptPath,
-                        string.Join(" ", arguments.Select(a => $"\"{a}\"")),
+                        string.Join(" ", args.Select(a => $"\"{a}\"")), 
                         DisplayName,
                         _environmentVariables,
                         _projectBasePath
                     );
-                    _parentViewModel?.SetScriptExecutionStatus($"Terminal launched for: {DisplayName}.");
+                    _parentViewModel?.SetScriptExecutionStatus($"已为 {DisplayName} 启动终端");
                 }
                 catch (Exception ex)
                 {
-                    _parentViewModel?.SetScriptExecutionStatus($"ERROR launching terminal for {DisplayName}: {ex.Message}");
+                    _parentViewModel?.SetScriptExecutionStatus($"启动终端失败 {DisplayName}: {ex.Message}");
                     _parentViewModel?.AppendScriptError(DisplayName, $"Terminal launch error: {ex.Message}");
                 }
             }
             else
             {
-                _parentViewModel?.ClearScriptOutput();
-                _parentViewModel?.SetScriptExecutionStatus($"Executing (direct): {DisplayName}...");
-                IsScriptOutputVisible = true;
-
-                _ = executor.ExecuteAndCaptureOutputAsync(
-                    _pythonExecutablePath,
-                    fullScriptPath,
-                    arguments,
-                    _environmentVariables,
-                    _projectBasePath,
-                    stdout => _parentViewModel?.AppendScriptOutput(DisplayName, stdout),
-                    stderr => _parentViewModel?.AppendScriptError(DisplayName, stderr)
-                ).ContinueWith(task => {
-                    if (task.Status == TaskStatus.RanToCompletion)
-                    {
-                        _parentViewModel?.HandleScriptExecutionCompletion(DisplayName, task.Result);
-                    }
-                    else if (task.Status == TaskStatus.Faulted)
-                    {
-                        _parentViewModel?.HandleScriptExecutionCompletion(DisplayName, null, task.Exception.Flatten().InnerException);
-                    }
-                    else if (task.Status == TaskStatus.Canceled)
-                    {
-                        _parentViewModel?.SetScriptExecutionStatus($"CANCELLED: {DisplayName}.");
-                        _parentViewModel?.AppendScriptOutput(DisplayName, "Execution was cancelled.");
-                    }
-                }, TaskScheduler.Default);
+                // 确保终端面板可见
+                if (_parentViewModel != null)
+                {
+                    _parentViewModel.IsTerminalVisible = true;
+                    
+                    // 使用ExecuteScriptInTerminal方法在嵌入式终端中执行
+                    _parentViewModel.ExecuteScriptInTerminal(this);
+                }
             }
         }
 

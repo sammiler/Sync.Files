@@ -63,11 +63,17 @@ namespace SyncFiles.UI.Controls
         private DispatcherTimer _outputProcessTimer;
         private const int OutputBufferProcessDelay = 100; // ms
 
+        // 添加静态实例引用
+        public static PtyTerminalControl Instance { get; private set; }
+
         public event EventHandler ProcessExited;
 
         public PtyTerminalControl()
         {
             InitializeComponent();
+
+            // 在构造函数中设置静态引用
+            Instance = this;
 
             // 设置默认颜色
             _defaultForeground = new SolidColorBrush(Colors.LightGray);
@@ -125,10 +131,49 @@ namespace SyncFiles.UI.Controls
                 terminalTextBox.Focus();
             }
         }
+        /// <summary>
+        /// 显式获取终端焦点
+        /// </summary>
+        public void GrabFocus()
+        {
+            _isMouseOverTerminal = true; // 确保允许获取焦点
+            _allowFocusCapture = true;
 
+            // 在UI线程上执行焦点操作
+            if (Dispatcher.CheckAccess())
+                terminalTextBox.Focus();
+            else
+                Dispatcher.InvokeAsync(() => terminalTextBox.Focus());
+        }
+
+        /// <summary>
+        /// 显式释放终端焦点
+        /// </summary>
+        public void ReleaseFocus()
+        {
+            _isMouseOverTerminal = false;
+            _allowFocusCapture = false;
+
+            // 找到父Window并将焦点移到它上面
+            if (Dispatcher.CheckAccess())
+            {
+                Window parentWindow = Window.GetWindow(this);
+                if (parentWindow != null)
+                    parentWindow.Focus();
+            }
+            else
+            {
+                Dispatcher.InvokeAsync(() => {
+                    Window parentWindow = Window.GetWindow(this);
+                    if (parentWindow != null)
+                        parentWindow.Focus();
+                });
+            }
+        }
         private void TerminalTextBox_MouseLeave(object sender, MouseEventArgs e)
         {
             _isMouseOverTerminal = false;
+            ReleaseFocus();
             // 当鼠标离开时不主动释放焦点，让用户去点击其他控件
         }
 
@@ -321,6 +366,7 @@ namespace SyncFiles.UI.Controls
         // 修改UpdateCaretDisplay方法，避免递归调用
         private void UpdateCaretDisplay()
         {
+            return;
             // 如果已经在更新光标，则退出以防止递归
             if (_isUpdatingCaret)
                 return;
@@ -385,7 +431,32 @@ namespace SyncFiles.UI.Controls
         {
             // 无论鼠标位置如何，确保终端可以获取焦点
             _isMouseOverTerminal = true;
-            terminalTextBox.Focus();
+            _allowFocusCapture = true;
+            
+            // 尝试立即获取焦点
+            if (Dispatcher.CheckAccess())
+            {
+                terminalTextBox.Focus();
+                
+                // 确保RichTextBox已实际获取焦点
+                if (!terminalTextBox.IsFocused)
+                {
+                    // 如果未能获取焦点，延迟再试
+                    Dispatcher.InvokeAsync(() => {
+                        terminalTextBox.Focus();
+                    }, DispatcherPriority.Input);
+                }
+            }
+            else
+            {
+                Dispatcher.InvokeAsync(() => {
+                    terminalTextBox.Focus();
+                });
+            }
+            
+            // 确保光标可见
+            _caretVisible = true;
+            UpdateCaretDisplay();
         }
         private void StartCaretBlinkTimer()
         {
@@ -468,12 +539,11 @@ namespace SyncFiles.UI.Controls
 
                 StartCaretBlinkTimer();
 
-                // 确保焦点在终端上
-                terminalTextBox.Focus();
 
                 // 启动进程后确保光标显示
                 _caretVisible = true;
                 UpdateCaretDisplay();
+                ReleaseFocus();
             }
             catch (Exception ex)
             {
@@ -1040,6 +1110,7 @@ namespace SyncFiles.UI.Controls
         /// </summary>
         private void SendInputChar(char c)
         {
+            return;
             if (_inputWriter == null || _process == null || _process.HasExited)
                 return;
 
@@ -1482,6 +1553,9 @@ namespace SyncFiles.UI.Controls
         {
             if (!_isDisposed)
             {
+                if (Instance == this)
+                    Instance = null;
+
                 _caretBlinkTimer?.Stop();
 
                 if (_process != null && !_process.HasExited)

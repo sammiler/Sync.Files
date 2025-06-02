@@ -55,7 +55,21 @@ namespace SyncFiles.UI.ToolWindows
                         else
                         {
                             // 对于直接API模式，使用嵌入式终端
-                            RunScriptInTerminal(scriptEntryVm);
+                            // 确保终端面板可见
+                            if (_viewModel != null)
+                            {
+                                _viewModel.IsTerminalVisible = true;
+                            }
+                            
+                            // 如果终端控件未初始化，则按原来方式执行
+                            if (terminalControl != null)
+                            {
+                                RunScriptInTerminal(scriptEntryVm);
+                            }
+                            else if (_viewModel != null)
+                            {
+                                _viewModel.AppendLogMessage("[错误] 终端控件未初始化");
+                            }
                         }
                         
                         e.Handled = true; // 标记事件已处理，防止进一步冒泡

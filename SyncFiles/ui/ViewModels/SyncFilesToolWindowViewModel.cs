@@ -21,6 +21,9 @@ using EnvDTE;
 using Microsoft.VisualStudio.Threading;
 using Microsoft.VisualStudio;
 using System.Windows.Media;
+using SyncFiles.UI.ToolWindows;
+using SyncFiles.UI.Controls;
+using System.Windows.Threading;
 
 namespace SyncFiles.UI.ViewModels
 {
@@ -57,6 +60,8 @@ namespace SyncFiles.UI.ViewModels
         public ICommand LoadSmartWorkflowCommand { get; }
         public ICommand CancelWorkflowCommand { get; }
         private string _currentScriptExecutionStatus;
+        // 添加到SyncFilesToolWindowViewModel类的私有字段
+        private Dictionary<string, bool> _expandedStates = new Dictionary<string, bool>();
         public string CurrentScriptExecutionStatus
         {
             get => _currentScriptExecutionStatus;
@@ -72,6 +77,36 @@ namespace SyncFiles.UI.ViewModels
             set => SetProperty(ref _isScriptOutputVisible, value);
         }
 
+        /// <summary>
+        /// 保存所有脚本组的展开状态
+        /// </summary>
+        private void SaveExpandedStates()
+        {
+            _expandedStates.Clear();
+
+            foreach (var group in ScriptGroups)
+            {
+                // 保存组ID和它的展开状态
+                _expandedStates[group.Id] = group.IsExpanded;
+            }
+
+            System.Diagnostics.Debug.WriteLine($"[INFO] 保存了 {_expandedStates.Count} 个组的展开状态");
+        }
+
+        /// <summary>
+        /// 恢复所有脚本组的展开状态
+        /// </summary>
+        private void RestoreExpandedStates()
+        {
+            foreach (var group in ScriptGroups)
+            {
+                if (_expandedStates.TryGetValue(group.Id, out bool isExpanded))
+                {
+                    group.IsExpanded = isExpanded;
+                    System.Diagnostics.Debug.WriteLine($"[INFO] 恢复组 '{group.Name}' 的展开状态: {isExpanded}");
+                }
+            }
+        }
         public ICommand ClearScriptOutputCommand { get; }
         public ICommand ToggleScriptOutputVisibilityCommand { get; }
         private bool _isBusy;
@@ -118,6 +153,14 @@ namespace SyncFiles.UI.ViewModels
         }
         public ObservableCollection<string> LogMessages { get; }
 
+        public bool _isTerminalVisible = true;
+        public bool IsTerminalVisible
+        {
+            get => _isTerminalVisible;
+            set => SetProperty(ref _isTerminalVisible, value);
+        }
+
+        public ICommand ToggleTerminalVisibilityCommand { get; private set; }
 
         public SyncFilesToolWindowViewModel()
         {
@@ -145,6 +188,11 @@ namespace SyncFiles.UI.ViewModels
             AddGroupIconPath = $"/SyncFiles;component/Resources/AddGroup.png";
             SyncGitIconPath = $"/SyncFiles;component/Resources/SyncGit.png";
             ToggleOutputIconPath = $"/SyncFiles;component/Resources/ToggleOutput.png";
+
+            ToggleTerminalVisibilityCommand = new RelayCommand(() =>
+            {
+                IsTerminalVisible = !IsTerminalVisible;
+            });
         }
 
         public SyncFilesToolWindowViewModel(IAsyncServiceProvider serviceProvider)
@@ -186,6 +234,10 @@ namespace SyncFiles.UI.ViewModels
             UpdateIconsForTheme();
             var themeService = ThemeService.Instance;
 
+            ToggleTerminalVisibilityCommand = new RelayCommand(() =>
+            {
+                IsTerminalVisible = !IsTerminalVisible;
+            });
         }
         public async Task InitializeAsync(
             string projectBasePath,
@@ -932,6 +984,14 @@ namespace SyncFiles.UI.ViewModels
 
         public async Task LoadAndRefreshScriptsAsync(bool forceScanDisk)
         {
+            // 保存每个组的展开状态
+            Dictionary<string, bool> expandedStates = new Dictionary<string, bool>();
+            foreach (var group in ScriptGroups)
+            {
+                expandedStates[group.Id] = group.IsExpanded;
+                System.Diagnostics.Debug.WriteLine($"保存组 '{group.Name}' 的展开状态: {group.IsExpanded}");
+            }
+
             if (_serviceProvider is SyncFilesPackage package)
             {
                 package.TriggerReinitializeConfigWatcher();
@@ -1053,8 +1113,28 @@ namespace SyncFiles.UI.ViewModels
                         ScriptGroups.Clear();
                         foreach (var groupVM in newScriptGroups)
                         {
+                            // 在添加到集合前恢复展开状态
+                            if (expandedStates.TryGetValue(groupVM.Id, out bool wasExpanded))
+                            {
+                                groupVM.IsExpanded = wasExpanded;
+                                System.Diagnostics.Debug.WriteLine($"恢复组 '{groupVM.Name}' 的展开状态: {wasExpanded}");
+                            }
                             ScriptGroups.Add(groupVM);
                         }
+
+                        // 额外的延迟处理以确保UI更新后TreeViewItem正确展开
+                        Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            foreach (var groupVM in ScriptGroups)
+                            {
+                                if (expandedStates.TryGetValue(groupVM.Id, out bool wasExpanded))
+                                {
+                                    groupVM.IsExpanded = wasExpanded;
+                                    System.Diagnostics.Debug.WriteLine($"强制刷新组 '{groupVM.Name}' 的展开状态: {wasExpanded}");
+                                }
+                            }
+                        }), DispatcherPriority.Loaded);
+
                         AppendLogMessage("Scripts tree UI refreshed.");
                         InitializePythonScriptWatcher();
                         UpdateIconsForTheme();
@@ -1512,6 +1592,103 @@ namespace SyncFiles.UI.ViewModels
             envVars["PYTHONIOENCODING"] = "UTF-8";
             
             return envVars;
+        }
+
+        public void ExecuteScriptInTerminal(ScriptEntryViewModel scriptViewModel)
+        {
+            // 确保终端可见
+            IsTerminalVisible = true;
+            
+            try
+            {
+                // 获取脚本信息
+                ScriptEntry scriptEntry = scriptViewModel.GetModel();
+                if (scriptEntry == null)
+                {
+                    AppendLogMessage("[错误] 无法获取脚本模型");
+                    return;
+                }
+
+                // 获取Python执行路径
+                string pythonExecutablePath = GetPythonExecutablePath();
+                if (string.IsNullOrEmpty(pythonExecutablePath))
+                {
+                    AppendLogMessage("[错误] Python可执行文件路径未设置");
+                    return;
+                }
+
+                // 获取脚本路径
+                string pythonScriptBasePath = GetPythonScriptBasePath();
+                string fullScriptPath = string.IsNullOrEmpty(scriptEntry.Path) ? string.Empty : 
+                    Path.GetFullPath(Path.Combine(pythonScriptBasePath ?? string.Empty, scriptEntry.Path ?? string.Empty));
+
+                if (string.IsNullOrEmpty(fullScriptPath) || !File.Exists(fullScriptPath))
+                {
+                    AppendLogMessage($"[错误] 脚本文件不存在: {fullScriptPath}");
+                    scriptViewModel.IsMissing = true;
+                    return;
+                }
+
+                // 获取工作目录
+                string workingDirectory = Path.GetDirectoryName(fullScriptPath);
+                
+                // 获取脚本参数
+                string arguments = string.Empty;
+                if (scriptEntry.GetType().GetProperty("Arguments") != null)
+                {
+                    arguments = scriptEntry.GetType().GetProperty("Arguments").GetValue(scriptEntry) as string ?? string.Empty;
+                }
+
+                // 获取环境变量
+                Dictionary<string, string> environmentVariables = GetEnvironmentVariables();
+
+                // 直接使用静态实例引用访问终端控件
+                var terminal = PtyTerminalControl.Instance;
+                if (terminal == null)
+                {
+                    AppendLogMessage("[错误] 终端控件未初始化");
+                    return;
+                }
+
+                // 准备终端以接收输入
+                terminal.PrepareForExecution();
+                terminal.GrabFocus(); // 使用新的显式焦点获取方法
+
+                // 在嵌入式终端中执行脚本
+                terminal.StartProcess(
+                    pythonExecutablePath,
+                    fullScriptPath,
+                    arguments,
+                    environmentVariables,
+                    workingDirectory
+                );
+
+                // 更新UI状态
+                SetScriptExecutionStatus($"正在终端中执行: {scriptEntry.GetDisplayName()}");
+            }
+            catch (Exception ex)
+            {
+                string errorMessage = $"启动脚本时出错: {ex.Message}";
+                System.Diagnostics.Debug.WriteLine($"[ERROR] {errorMessage}\n{ex.StackTrace}");
+                AppendLogMessage($"[错误] {errorMessage}");
+            }
+        }
+
+        private SyncFilesToolWindowControl GetToolWindowControl()
+        {
+            var allWindows = Application.Current?.Windows.OfType<System.Windows.Window>();
+            if (allWindows == null) return null;
+
+            foreach (var window in allWindows)
+            {
+                var children = LogicalTreeHelper.GetChildren(window).OfType<DependencyObject>();
+                foreach (var child in children)
+                {
+                    if (child is SyncFilesToolWindowControl control)
+                        return control;
+                }
+            }
+            return null;
         }
     }
 }

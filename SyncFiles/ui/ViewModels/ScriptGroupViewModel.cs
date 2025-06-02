@@ -24,6 +24,19 @@ namespace SyncFiles.UI.ViewModels
                 }
             }
         }
+        private bool _isExpanded = true; // 默认展开
+
+        public bool IsExpanded
+        {
+            get => _isExpanded;
+            set
+            {
+                if (SetProperty(ref _isExpanded, value))
+                {
+                    // 如果需要其他操作，可以在这里添加
+                }
+            }
+        }
         public ObservableCollection<ScriptEntryViewModel> Scripts { get; }
         public ICommand AddScriptToGroupCommand { get; private set; }
         public ICommand RenameGroupCommand { get; private set; }

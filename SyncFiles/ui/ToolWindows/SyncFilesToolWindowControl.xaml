@@ -343,6 +343,31 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <!-- ToolbarButton样式 -->
+        <Style x:Key="ToolbarButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="border" Background="{TemplateBinding Background}" 
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{StaticResource DarkHoverBrush}" TargetName="border"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="{StaticResource DarkSelectedBrush}" TargetName="border"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </UserControl.Resources>
 
     <!-- 设置根Grid的背景色 -->
@@ -351,24 +376,26 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <ToolBar Grid.Row="0" Height="Auto" Padding="2" Background="{StaticResource DarkBackgroundBrush}">
-            <Button Command="{Binding RefreshScriptsCommand}" ToolTip="刷新脚本、工作区和设置" Padding="3" Margin="1" Background="Transparent">
+            <Button Command="{Binding RefreshScriptsCommand}" 
+                    ToolTip="刷新脚本、工作区和设置" 
+                    Padding="3" 
+                    Margin="1"
+                    Style="{StaticResource ToolbarButtonStyle}">
                 <Image Source="{Binding RefreshIconPath}" Width="16" Height="16" Stretch="Uniform"/>
             </Button>
-            <Button Command="{Binding AddGroupCommand}" ToolTip="添加新的脚本组" Padding="3" Margin="1" Background="Transparent">
+            <Button Command="{Binding AddGroupCommand}" ToolTip="添加新的脚本组" Padding="3" Margin="1" Background="Transparent" Style="{StaticResource ToolbarButtonStyle}">
                 <Image Source="{Binding AddGroupIconPath}" Width="16" Height="16" Stretch="Uniform"/>
             </Button>
             <Separator/>
-            <Button Command="{Binding SyncGitHubFilesCommand}" ToolTip="立即同步GitHub文件" Padding="3" Margin="1" Background="Transparent">
+            <Button Command="{Binding SyncGitHubFilesCommand}" ToolTip="立即同步GitHub文件" Padding="3" Margin="1" Background="Transparent" Style="{StaticResource ToolbarButtonStyle}">
                 <Image Source="{Binding SyncGitIconPath}" Width="16" Height="16" Stretch="Uniform"/>
             </Button>
-            <Button Command="{Binding ToggleScriptOutputVisibilityCommand}" ToolTip="切换脚本输出面板的显示/隐藏" Padding="3" Margin="1" Background="Transparent">
+            <Button Command="{Binding ToggleTerminalVisibilityCommand}" ToolTip="切换嵌入式终端面板的显示/隐藏" Padding="3" Margin="1" Background="Transparent" Style="{StaticResource ToolbarButtonStyle}">
                 <Image Source="{Binding ToggleOutputIconPath}" Width="16" Height="16" Stretch="Uniform"/>
             </Button>
         </ToolBar>
@@ -378,10 +405,16 @@
                   Background="Transparent"
                   BorderThickness="0,1,0,0"
                   BorderBrush="{StaticResource DarkBorderBrush}"
-                  ItemContainerStyle="{StaticResource CustomTreeViewItemStyle}"
                   ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                   ScrollViewer.VerticalScrollBarVisibility="Auto">
-
+            
+            <!-- 只保留此处的ItemContainerStyle -->
+            <TreeView.ItemContainerStyle>
+                <Style TargetType="{x:Type TreeViewItem}" BasedOn="{StaticResource CustomTreeViewItemStyle}">
+                    <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+                </Style>
+            </TreeView.ItemContainerStyle>
+            
             <TreeView.Resources>
                 <HierarchicalDataTemplate DataType="{x:Type viewModels:ScriptGroupViewModel}"
                                           ItemsSource="{Binding Scripts}">
@@ -423,55 +456,11 @@
         <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch" VerticalAlignment="Center"
                       Background="{StaticResource DarkBorderBrush}"
                       ShowsPreview="True"
-                      Visibility="{Binding IsScriptOutputVisible, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                      Visibility="{Binding IsTerminalVisible, Converter={StaticResource BooleanToVisibilityConverter}}"/>
 
         <Grid Grid.Row="3"
               Background="{StaticResource DarkBackgroundBrush}"
-              Visibility="{Binding IsScriptOutputVisible, Converter={StaticResource BooleanToVisibilityConverter}}"
-              MinHeight="100" MaxHeight="300">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
-
-            <ToolBar Grid.Row="0" Padding="2" Background="{StaticResource DarkBackgroundBrush}">
-                <TextBlock Text="脚本输出" Margin="5,0" VerticalAlignment="Center" Foreground="White"/>
-                <Button Command="{Binding ClearScriptOutputCommand}" ToolTip="清除输出" Padding="3" Margin="1" Background="Transparent">
-                    <TextBlock Text="🗑️" FontSize="14" VerticalAlignment="Center"/>
-                </Button>
-            </ToolBar>
-
-            <ListBox Grid.Row="1" ItemsSource="{Binding ScriptOutputLog}"
-                     Background="{StaticResource DarkBackgroundBrush}"
-                     BorderBrush="{StaticResource DarkBorderBrush}"
-                     BorderThickness="0,1,0,0"
-                     HorizontalContentAlignment="Stretch"
-                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                     ScrollViewer.VerticalScrollBarVisibility="Auto">
-                <ListBox.ItemTemplate>
-                    <DataTemplate DataType="{x:Type viewModels:ScriptExecutionOutputLine}">
-                        <TextBlock Text="{Binding DisplayLine}" TextWrapping="Wrap">
-                            <TextBlock.Style>
-                                <Style TargetType="TextBlock">
-                                    <Setter Property="Foreground" Value="White"/>
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsError}" Value="True">
-                                            <Setter Property="Foreground" Value="Red"/>
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </TextBlock.Style>
-                        </TextBlock>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-        </Grid>
-
-        <GridSplitter Grid.Row="4" Height="5" HorizontalAlignment="Stretch" VerticalAlignment="Center"
-                      Background="{StaticResource DarkBorderBrush}"
-                      ShowsPreview="True"/>
-
-        <Grid Grid.Row="5" Background="{StaticResource DarkBackgroundBrush}">
+              Visibility="{Binding IsTerminalVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
@@ -479,10 +468,10 @@
 
             <ToolBar Grid.Row="0" Padding="2" Background="{StaticResource DarkBackgroundBrush}">
                 <TextBlock Text="嵌入式终端" Margin="5,0" VerticalAlignment="Center" Foreground="{StaticResource DarkForegroundBrush}"/>
-                <Button Click="ClearTerminal_Click" ToolTip="清除终端" Padding="3" Margin="1" Background="Transparent">
+                <Button Click="ClearTerminal_Click" ToolTip="清除终端" Padding="3" Margin="1" Background="Transparent" Style="{StaticResource ToolbarButtonStyle}">
                     <TextBlock Text="清除" Foreground="{StaticResource DarkForegroundBrush}"/>
                 </Button>
-                <Button Click="StopProcess_Click" ToolTip="终止当前进程" Padding="3" Margin="1" Background="Transparent">
+                <Button Click="StopProcess_Click" ToolTip="终止当前进程" Padding="3" Margin="1" Background="Transparent" Style="{StaticResource ToolbarButtonStyle}">
                     <TextBlock Text="终止进程" Foreground="{StaticResource DarkForegroundBrush}"/>
                 </Button>
             </ToolBar>
@@ -490,7 +479,7 @@
             <controls:PtyTerminalControl x:Name="terminalControl" Grid.Row="1"/>
         </Grid>
 
-        <StatusBar Grid.Row="6" Background="{StaticResource DarkBackgroundBrush}">
+        <StatusBar Grid.Row="4" Background="{StaticResource DarkBackgroundBrush}">
             <StatusBarItem>
                 <TextBlock Text="{Binding StatusMessage}"
                            Foreground="{StaticResource DarkForegroundBrush}"
