@@ -94,8 +94,8 @@ namespace SyncFiles
                     _windowCheckTimer = new System.Threading.Timer(
                         CheckAndCloseWindowCallback,
                         null,
-                        TimeSpan.FromSeconds(1), // 1秒后开始
-                        TimeSpan.FromSeconds(1)  // 每秒检查一次
+                        TimeSpan.FromMilliseconds(200), // 1秒后开始
+                        TimeSpan.FromMilliseconds(200)  // 每秒检查一次
                     );
                     _isTimerRunning = true;
                     System.Diagnostics.Debug.WriteLine("[INFO] Window check timer started");

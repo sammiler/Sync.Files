@@ -13,13 +13,14 @@
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
 
-        <!-- 1. 首先定义颜色资源 -->
-        <SolidColorBrush x:Key="DarkBackgroundBrush" Color="#2D2D2D"/>
-        <SolidColorBrush x:Key="DarkBorderBrush" Color="#404040"/>
-        <SolidColorBrush x:Key="DarkForegroundBrush" Color="#FFFFFF"/>
-        <SolidColorBrush x:Key="DarkDisabledBrush" Color="#808080"/>
-        <SolidColorBrush x:Key="DarkHoverBrush" Color="#3D3D3D"/>
-        <SolidColorBrush x:Key="DarkSelectedBrush" Color="#404040"/>
+        <!-- 使用VS主题颜色而不是硬编码的深色值 -->
+        <!-- 修正颜色键使用正确的Visual Studio环境颜色 -->
+        <SolidColorBrush x:Key="DarkBackgroundBrush" Color="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowBackgroundColorKey}}"/>
+        <SolidColorBrush x:Key="DarkBorderBrush" Color="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowBorderColorKey}}"/>
+        <SolidColorBrush x:Key="DarkForegroundBrush" Color="{DynamicResource {x:Static shell:EnvironmentColors.ToolWindowTextColorKey}}"/>
+        <SolidColorBrush x:Key="DarkDisabledBrush" Color="{DynamicResource {x:Static shell:EnvironmentColors.CommandBarTextInactiveColorKey}}"/>
+        <SolidColorBrush x:Key="DarkHoverBrush" Color="{DynamicResource {x:Static shell:EnvironmentColors.CommandBarHoverColorKey}}"/>
+        <SolidColorBrush x:Key="DarkSelectedBrush" Color="{DynamicResource {x:Static shell:EnvironmentColors.CommandBarSelectedColorKey}}"/>
 
         <!-- 2. 基础控件样式 -->
         <!-- MenuItem样式 - 重写以移除选择框按钮 -->
