@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
     <Metadata>
-        <Identity Id="SyncFiles.7c6d7d32-c18a-4509-81fa-ff6ca4ee70ca" Version="1.0" Language="en-US" Publisher="SamMiller" />
+        <Identity Id="SyncFiles.7c6d7d32-c18a-4509-81fa-ff6ca4ee70ca" Version="1.1" Language="en-US" Publisher="SamMiller" />
         <DisplayName>SyncFiles</DisplayName>
         <Description xml:space="preserve">SyncFiles is a lightweight plugin for VS that simplifies syncing files and directories from GitHub repositories directly into your project. </Description>
         <License>Resources\LICENSE.txt</License>
