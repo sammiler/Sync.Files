@@ -26,7 +26,7 @@ namespace SyncFiles.Commands
             Instance = new ShowToolWindowCommand(package, commandService);
         }
         // In ShowToolWindowCommand.cs
-        private void Execute(object sender, EventArgs e) // <<< NOW SYNCHRONOUS VOID
+        public void Execute(object sender, EventArgs e) // <<< NOW SYNCHRONOUS VOID
         {
             this.package.JoinableTaskFactory.RunAsync(async () =>
             {

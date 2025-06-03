@@ -270,15 +270,16 @@ namespace SyncFiles.Core.Services
             }
             if (yamlConfig.EnvVariables != null)
             {
-                currentSettings.EnvVariables.Clear();
-                currentSettings.EnvVariables["PROJECT_DIR"] = _projectBasePath;
-                currentSettings.EnvVariables["USER_HOME"] = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                currentSettings.EnvVariables["SYSTEM_TYPE"] = System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows) ? "Windows" :
-                                                            System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Linux) ? "Linux" :
-                                                            System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.OSX) ? "OSX" : "Unknown";
+                currentSettings.EnvironmentVariablesList.Clear();
+                currentSettings.EnvironmentVariablesList.Add(new EnvironmentVariableEntry( "PROJECT_DIR", _projectBasePath));
+                currentSettings.EnvironmentVariablesList.Add(new EnvironmentVariableEntry("USER_HOME", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)));
                 foreach (var kvp in yamlConfig.EnvVariables)
                 {
-                    currentSettings.EnvVariables[kvp.Key] = ResolveValue(kvp.Value);
+                    if (kvp.Key == "PROJECT_DIR" || kvp.Key == "USER_HOME" || kvp.Key == "SYSTEM_TYPE") 
+                    {
+                        continue;
+                    }
+                    currentSettings.EnvironmentVariablesList.Add(new EnvironmentVariableEntry( kvp.Key, kvp.Value));
                 }
                 Console.WriteLine($"[INFO] [WORKFLOW] Environment variables updated from YAML. Count: {currentSettings.EnvVariables.Count}");
             }

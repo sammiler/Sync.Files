@@ -48,6 +48,7 @@
   <ItemGroup>
     <Compile Include="commands\ShowSettingsWindowCommand.cs" />
     <Compile Include="commands\ShowToolWindowCommand.cs" />
+    <Compile Include="commands\SmartLoadWorkflowCommand.cs" />
     <Compile Include="config\SmartWorkflow\SmartPlatformConfig.cs" />
     <Compile Include="config\SmartWorkflow\SmartWatchEntry.cs" />
     <Compile Include="management\ProjectWrapper.cs" />
@@ -72,6 +73,9 @@
     <Compile Include="ui\Controls\PtyTerminalControl.xaml.cs">
       <DependentUpon>PtyTerminalControl.xaml</DependentUpon>
     </Compile>
+    <Compile Include="ui\Dialogs\WorkflowUrlDialog.xaml.cs">
+      <DependentUpon>WorkflowUrlDialog.xaml</DependentUpon>
+    </Compile>
     <Compile Include="ui\ToolWindows\SyncFilesToolWindow.cs" />
     <Compile Include="ui\ToolWindows\SyncFilesToolWindowControl.xaml.cs">
       <DependentUpon>SyncFilesToolWindowControl.xaml</DependentUpon>
@@ -83,6 +87,24 @@
     <Compile Include="ui\ViewModels\ViewModelBase.cs" />
   </ItemGroup>
   <ItemGroup>
+    <Resource Include="Resources\Workflow.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
+    <EmbeddedResource Include="Resources\Workflow_dark.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <Resource Include="Resources\Sync_dark.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Resources\Sync.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Resources\Settings_dark.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
+    <Resource Include="Resources\Settings.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Resource>
     <Resource Include="Resources\ToggleOutput.png" />
     <Resource Include="Resources\ToggleOutput_dark.png" />
     <Resource Include="Resources\AddGroup.png" />
@@ -138,6 +160,9 @@
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="ui\Controls\PtyTerminalControl.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+    <Page Include="ui\Dialogs\WorkflowUrlDialog.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
     <Page Include="ui\ToolWindows\SyncFilesToolWindowControl.xaml">

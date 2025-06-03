@@ -72,6 +72,9 @@ namespace SyncFiles
                 await ShowToolWindowCommand.InitializeAsync(this);
                 await ShowSettingsWindowCommand.InitializeAsync(this, _settingsManager);
 
+                // 注册 Smart Load Workflow 命令
+                await SmartLoadWorkflowCommand.InitializeAsync(this, _smartWorkflowService);
+
                 await EnsureProjectSpecificServicesAsync();
                 InitializeConfigWatcher();
 
@@ -433,6 +436,45 @@ namespace SyncFiles
             {
                 System.Diagnostics.Debug.WriteLine($"[ERROR] GetProjectBasePathAsync: Exception while getting path: {ex.Message}");
             }
+
+            // 只在直接子目录中查找 CMakeLists.txt 文件
+            string FindTopCMakeDir(string rootDir)
+            {
+                try
+                {
+                    // 首先检查根目录本身
+                    var rootCmake = Path.Combine(rootDir, "CMakeLists.txt");
+                    if (File.Exists(rootCmake))
+                    {
+                        return rootDir;
+                    }
+
+                    // 然后只检查直接子目录
+                    foreach (var dir in Directory.GetDirectories(rootDir))
+                    {
+                        var cmakeFile = Path.Combine(dir, "CMakeLists.txt");
+                        if (File.Exists(cmakeFile))
+                        {
+                            return dir;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[ERROR] FindTopCMakeDir: {ex.Message}");
+                }
+                return null;
+            }
+
+            if (!string.IsNullOrEmpty(determinedPath) && Directory.Exists(determinedPath))
+            {
+                string topCMakeDir = FindTopCMakeDir(determinedPath);
+                if (!string.IsNullOrEmpty(topCMakeDir))
+                {
+                    System.Diagnostics.Debug.WriteLine($"[INFO] Found CMakeLists.txt directory: {topCMakeDir}");
+                    return topCMakeDir;
+                }
+            }
             return determinedPath;
         }
 
@@ -516,6 +558,34 @@ namespace SyncFiles
                     OLEMSGBUTTON.OLEMSGBUTTON_OK,
                     OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
                 System.Diagnostics.Debug.WriteLine($"[ERROR] [PACKAGE_SHOW_TOOL_WINDOW] {ex.ToString()}");
+            }
+        }
+
+        // 添加刷新工具窗口的方法，供命令调用
+        public async Task RefreshToolWindowAsync()
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            
+            try
+            {
+                var syncFilesWindow = await this.ShowToolWindowAsync(
+                    typeof(SyncFilesToolWindow),
+                    0,
+                    create: false,  // 只在已创建的情况下获取窗口
+                    cancellationToken: this.DisposalToken);
+                    
+                if (syncFilesWindow?.Content is SyncFilesToolWindowControl control)
+                {
+                    if (control.DataContext is SyncFilesToolWindowViewModel viewModel)
+                    {
+                        await viewModel.LoadAndRefreshScriptsAsync(true);
+                        viewModel.AppendLogMessage("[INFO] 设置已刷新");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ERROR] RefreshToolWindowAsync: {ex}");
             }
         }
     }
